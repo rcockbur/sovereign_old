@@ -18,7 +18,7 @@
 main.lua
 /core         -- time, registry, world
 /simulation   -- unit.lua, jobs, needs, mood, health
-/config       -- all config tables
+/config       -- all config tables, constants.lua
 /ui           -- rendering and input
 /events       -- event system, Fey, Changeling
 ```
@@ -42,7 +42,12 @@ end
 - `snake_case` for variables and table keys
 - `camelCase` for functions
 - String identifiers for equality-only checks (modifier sources, skill names, illness names, activity types, crop types, resource types)
-- Integer constants for ordered/comparable values (tier, priority, job tier)
+- Integer constants for ordered/comparable values (tier, priority, job tier, tree growth stage)
+- All boolean fields use `is_` or `has_` prefix, no exceptions. `is_` for states/properties, `has_` for possession/presence.
+
+### Method Syntax
+- Colon (`:`) for method definitions and calls — anything with `self`
+- Dot (`.`) for field access and static/utility functions
 
 ### Error Handling
 - Prefer hard failures over silent ones — access config tables and variables directly, let Lua throw on nil
@@ -51,22 +56,61 @@ end
 - Use `== false` instead of `not`
 
 ### IDs
-- One global incrementing counter for all entity types (units, memories, buildings, jobs, furniture, mover rules, resource nodes)
+- One global incrementing counter for all entity types (units, memories, buildings, jobs, furniture, hauling rules)
+- Counter lives on the registry module: `registry:nextId()`
 - A unit's `id` persists when they die and become a memory
+- Trees and herbs are tile data — no IDs
+
+### Flat Index Convention
+```lua
+function tileIndex(x, y)
+    return (x - 1) * MAP_HEIGHT + y
+end
+
+function tileXY(index)
+    local x = math.floor((index - 1) / MAP_HEIGHT) + 1
+    local y = (index - 1) % MAP_HEIGHT + 1
+    return x, y
+end
+```
+
+All spatial lookups use `tileIndex(x, y)`. Applied to: tile grid, growing tree data, visibility sets, and all spatial lookups.
+
+### Module Pattern
+- Local requires per file. Each file declares dependencies at the top. No globals for module references.
+- Entity creation via factory functions on owning modules. One call allocates ID, builds entity, inserts into registry + typed list.
 
 ### Architecture
 - Units carry state. Config tables carry rules. Systems read both.
 - Tier-based behavioral differences live in config tables keyed by tier — not on the unit.
 - Skill caps live in job config tables — not on the unit.
+- Hybrid registry: `registry[id]` for cross-type lookup; each module maintains typed arrays for iteration.
+- Deferred deletion: `is_dead = true` flag, update loops skip, `units:sweepDead` at end of tick (swap-and-pop).
+
+### Lua Performance
+- **Never create tables in per-tick code.** Reuse buffers, pre-allocate and clear.
+- **Flat index for spatial lookups.** Integer keys use Lua's array part (direct C array access).
+- **Prefer numeric `for` loops** over `ipairs`/`pairs` in hot paths.
+- **Localize globals** in hot files: `local math_floor = math.floor`.
+- **No string concatenation for keys.** Use integer-indexed tables or flat index math.
 
 ---
 
 ## Constants
 
+All constants in `/config/constants.lua`.
+
 ```lua
 Tier     = { SERF = 1, FREEMAN = 2, GENTRY = 3 }
 JobTier  = { T1 = 1, T2 = 2, T3 = 3 }
 Priority = { DISABLED = 0, LOW = 1, NORMAL = 2, HIGH = 3 }
+InterruptLevel = { NONE = 0, SOFT = 1, HARD = 2 }
+
+-- Map
+MAP_WIDTH  = 400
+MAP_HEIGHT = 200
+SETTLEMENT_COLUMNS = 200
+FOREST_START       = 201
 
 -- Calendar
 MINUTES_PER_HOUR = 60
@@ -106,6 +150,25 @@ CHURCH_DAY = 1   -- Sunday
 AGES_PER_YEAR    = SEASONS_PER_YEAR
 AGE_OF_ADULTHOOD = 16
 
+-- Trees
+SPREAD_TILES_PER_TICK = 50
+SPREAD_CHANCE         = 0.01
+SPREAD_RADIUS         = 4
+SAPLING_GROWTH_TICKS  = 0    -- TBD
+YOUNG_GROWTH_TICKS    = 0    -- TBD
+
+-- Visibility
+SIGHT_RADIUS = 8
+
+-- Inventory
+SLOT_CAPACITY           = 20
+WAREHOUSE_SLOT_CAPACITY = 60
+
+-- Rendering
+TILE_SIZE = 32
+ZOOM_MIN  = 0.5
+ZOOM_MAX  = 2.0
+
 -- Day/season names
 DAY_NAMES    = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
 SEASON_NAMES = { "Spring", "Summer", "Autumn", "Winter" }
@@ -119,12 +182,13 @@ SEASON_NAMES = { "Spring", "Summer", "Autumn", "Winter" }
 |---|---|
 | **Time** | Clock state (tick, minute, hour, day, season, year). Accumulator and speed. Provides `hashOffset()`. Does not know about other systems. |
 | **Simulation** | The `onTick` orchestrator. Calls module update functions in order. Owns no data. |
-| **World** | Tile grid, buildings, resource nodes, forest depth map. Posts jobs to the queue. |
-| **Units** | Unit state: attributes, skills, needs, mood, health, relationships, tier, current activity. Owns creation, death, promotion/demotion. |
-| **Job Queue** | Standalone. Owns the prioritized list of available work tasks. World posts; units query and claim. |
+| **World** | Tile grid, buildings (array, swap-and-pop), stockpiles (array, swap-and-pop), forest depth map, tree cursor scan, growing tree data, visibility state. Posts jobs to the queue. |
+| **Units** | Unit state: attributes, skills, needs, mood, health, relationships, tier, current activity, carrying. Owns creation, death, promotion/demotion. Owns per-unit visibility sets. `units.all` is an array; swap-and-pop on dead sweep. |
+| **Job Queue** | Standalone module. Single flat array of all work tasks (regular + hauling). Swap-and-pop deletion. World and hauling system post; units query and claim. |
+| **Hauling System** | Scans building outputs/inputs and stockpiles. Posts hauling jobs based on push/pull rules. Deficit-based posting. |
 | **Dynasty** | Succession logic, leader tracking, regency state. Reads unit relationship graphs. |
 | **Events** | Changeling, Fey encounters, random occurrences, funerals, weddings, Sunday service. Reads/modifies world and units. |
-| **Registry** | `registry[id]` returns a living unit or a memory. Single lookup pool. |
+| **Registry** | Global lookup: `registry[id]` returns any entity (unit, memory, building, stockpile, job). Single hash-table pool. Owns global ID counter (`registry:nextId()`). |
 
 ---
 
@@ -150,6 +214,8 @@ function simulation:onTick(time)
     units:update(time)
     world:updateBuildings(time)
     world:updateResources(time)
+    world:updateTrees(time)
+    units:sweepDead(time)
 end
 ```
 
@@ -171,9 +237,12 @@ function hashOffset(id)
 end
 
 function units:update(time)
-    for _, unit in ipairs(self.all) do
-        if (time.tick + hashOffset(unit.id)) % HASH_INTERVAL == 0 then
-            unit:update(time)
+    for i = 1, #self.all do
+        local unit = self.all[i]
+        if unit.is_dead == false then
+            if (time.tick + hashOffset(unit.id)) % HASH_INTERVAL == 0 then
+                unit:update(time)
+            end
         end
     end
 end
@@ -181,11 +250,49 @@ end
 
 ### Per-Unit Update Order
 1. Update needs (drain)
-2. Check critical need interrupts (drop job, self-assign behavior)
-3. If idle, poll job queue
-4. Execute work progress (grow attribute; grow skill if T2/T3 and below cap)
-5. Recalculate mood (stateless)
-6. Recalculate health (stateless)
+2. Check hard need interrupts (drop everything, self-assign behavior)
+3. Check soft need interrupts (finish current delivery, then self-assign)
+4. If carrying and not mid-delivery, deposit first (offload if job changed)
+5. If idle, poll job queue
+6. Execute work progress (grow attribute; grow skill if T2/T3 and below cap)
+7. Recalculate mood (stateless)
+8. Recalculate health (stateless)
+
+---
+
+## Map
+
+400x200 tile grid, 1-indexed. Columns 1–200 = settlement. Columns 201–400 = forest. `forest_depth` 0.0 in settlement, linear 0.0–1.0 in forest. `forest_danger = depth²`.
+
+Terrain types: grass, dirt (both pathable), rock (impassable), water (impassable). Lakes only. No rivers. No elevation.
+
+Tile grid stored as flat array using `tileIndex(x, y)`.
+
+---
+
+## Tree System
+
+Trees are tile data, not entities. Growth stages: 0 (empty), 1 (sapling/passable), 2 (young/blocking), 3 (mature/blocking/spreadable).
+
+Cursor scan: `SPREAD_TILES_PER_TICK` (50) tiles per tick, linear wrap. Saplings/young → promote if enough ticks elapsed. Mature → spread to random tile within manhattan distance `SPREAD_RADIUS` (4).
+
+Growth data: `world.growing_tree_data[tileIndex(x, y)] = planted_tick`. Only stages 1–2. Removed on promotion to mature.
+
+Safety: no spread adjacent to buildings. Defer promotion if unit on tile.
+
+---
+
+## Herb System
+
+Herbs are tile data: `tile.has_herb`. Spread via cursor scan, gated by forest depth.
+
+---
+
+## Visibility System
+
+`tile.is_explored` (permanent) + `tile.visible_count` (current unit count). Recursive shadowcasting per unit, radius `SIGHT_RADIUS` (8). Recompute on tile change only. Double-buffered visibility sets per unit. Reveal events on `visible_count` 0→1.
+
+Vision blockers: trees stage 2+ with ≥1 tree neighbor. Buildings. Rock. First blocker is visible; shadow behind.
 
 ---
 
@@ -193,16 +300,31 @@ end
 
 - **OO, not ECS**
 - **Single `unit.lua`** — no split unit files
-- **Single global job queue** for all job types
-- **Needs bypass the job queue** — self-assigned directly on critical threshold
-- **Three needs only:** hunger, sleep, recreation. Spirituality is NOT a need (handled by Sunday service).
+- **Single global job queue** for all job types including hauling — unified job structure with type-specific fields
+- **Two-tier need interrupts** — soft (finish delivery) and hard (immediate). Needs never posted as jobs.
+- **Three needs only:** hunger, sleep, recreation. Spirituality is NOT a need.
 - **Mood and health are stateless** — recalculated from scratch each hashed update
 - **Skill caps on the job, not the unit** — Serfs have no skills at all
-- **Workers own their full job cycle** — no separate hauling job type
+- **Workers own their full job cycle** — carrying is part of the job, not a separate hauling task
+- **Offloading** — when switching job types while carrying, deposit to nearest stockpile first
+- **Single resource type carried at a time** — deposit before starting new work
 - **Blueprint-based buildings** — no room detection; interiors are spatial data from config
-- **Single-zone map** — no separate regions; `forest_danger` derived on demand as `depth²`
+- **Building placement rules** — most need pathable ground; mines need rock edge; docks need water edge
+- **Unified building inventory model** — input/output inventories using slot system; three work patterns (hub gathering, stationary extraction, production crafting)
+- **Stockpiles as intermediary** — all redistribution flows through stockpiles, no direct building-to-building
+- **Slot-based inventory** — slot_capacity / resource slot_size = units per slot
+- **Hauling system posts deficit-based jobs** — validated at claim time
+- **Trees and herbs are tile data** — not entities, no IDs, no registry
+- **Cursor-based tree/herb updates** — fixed budget per tick, linear scan
+- **Shadowcasting visibility** — per unit, recompute on tile change, double-buffered
+- **Single-zone map** — 400x200, settlement left, forest right
+- **Flat index convention** — `tileIndex(x, y)` for all spatial lookups
 - **All rate values stored as per-tick** — use conversion constants in config tables
 - **Market delivery model** — merchant walks greedy nearest-neighbor route to homes
+- **Deferred deletion** — `is_dead` flag, sweep at end of tick, swap-and-pop removal
+- **Hybrid registry** — global hash lookup + per-module typed arrays
+- **Local requires per file** — no globals for module references
+- **Input abstraction** — game code references actions, not physical keys
 
 ---
 
@@ -212,10 +334,11 @@ end
 ```lua
 unit = {
     id = 0, name = "", tier = Tier.SERF,
+    is_dead = false,
     age = 0,
     birth_day = 0, birth_season = 0,
     is_child = true,
-    attending_school = false,
+    is_attending_school = false,
 
     is_leader = false, is_regent = false,
 
@@ -244,11 +367,18 @@ unit = {
     health = 100,
     health_modifiers = {},
 
+    carrying = nil,         -- { resource = "logs", amount = 3 } or nil
+
     current_job_id = nil,
     current_activity = nil,
     home_id = nil,
     bed_index = nil,
     x = 0, y = 0,
+
+    -- Visibility (double buffer, keyed by tileIndex)
+    visible_a = {},
+    visible_b = {},
+    active_visible = "a",
 }
 ```
 
@@ -263,26 +393,36 @@ memory = {
 }
 ```
 
-### Job
-```lua
-job = {
-    id = 0,
-    type = "chop_tree",
-    priority = Priority.NORMAL,
-    x = 0, y = 0,
-    target_id = nil,
-    claimed_by = nil,
-    progress = 0,
-}
-```
-
 ### Tile
 ```lua
 tile = {
-    terrain = "grass",
+    terrain = "grass",      -- "grass" | "dirt" | "rock" | "water"
+    tree = 0,               -- 0=empty, 1=sapling, 2=young, 3=mature
+    has_herb = false,
     building_id = nil,
-    resource = nil,
     forest_depth = 0.0,
+    is_explored = false,
+    visible_count = 0,
+    claimed_by = nil,       -- unit_id claiming resource for gathering
+}
+```
+
+### Job (unified structure)
+```lua
+job = {
+    id = 0,
+    type = "chop_tree",      -- keys into JobConfig, or "haul"
+    claimed_by = nil,
+
+    -- Regular job fields (nil for hauling)
+    x = 0, y = 0,
+    target_id = nil,
+    progress = 0,
+
+    -- Hauling job fields (nil for regular)
+    resource = nil,
+    source_id = nil,
+    destination_id = nil,
 }
 ```
 
@@ -294,7 +434,35 @@ building = {
     is_built = false, build_progress = 0,
     interior = {},
     crop = nil,
-    assigned_worker_id = nil,
+
+    worker_ids = {},
+    worker_limit = 0,
+
+    input = nil,             -- inventory or nil
+    output = nil,            -- inventory or nil
+
+    work_in_progress = nil,  -- { recipe, progress, work_required } or nil
+}
+```
+
+### Inventory
+```lua
+inventory = {
+    slots = {
+        { resource = "logs", amount = 3 },
+        { resource = nil, amount = 0 },
+    },
+    slot_capacity = 20,
+    filters = { logs = 4, stone = 4 },
+}
+```
+
+### Stockpile
+```lua
+stockpile = {
+    id = 0,
+    x = 0, y = 0, width = 0, height = 0,
+    inventory = { ... },    -- slot count = width * height
 }
 ```
 
@@ -305,17 +473,24 @@ household = {
     member_ids = {},
     food = { bread = 0, vegetables = 0, meat = 0, fish = 0 },
     clothing = 0,
+    jewelry = 0,
+    max_food_per_type = 10,
+    max_clothing = 5,
+    max_jewelry = 2,
 }
 ```
 
 ### World
 ```lua
 world = {
-    width = 0, height = 0,
-    tiles = {},
-    buildings = {},
-    resources = {},
-    job_queue = {},
+    width = MAP_WIDTH,
+    height = MAP_HEIGHT,
+    tiles = {},              -- flat array, tileIndex(x, y)
+    buildings = {},          -- array, swap-and-pop deletion
+    stockpiles = {},         -- array, swap-and-pop deletion
+
+    spread_cursor = 0,
+    growing_tree_data = {},  -- tileIndex → planted_tick
 }
 ```
 
@@ -323,7 +498,7 @@ world = {
 ```lua
 time = {
     speed = Speed.NORMAL,
-    paused = false,
+    is_paused = false,
     accumulator = 0,
     tick = 0,
     minute = 0,
@@ -341,13 +516,13 @@ time = {
 ```lua
 NeedsConfig = {
     child = {
-        hunger     = { drain = 2 * PER_HOUR, mood_threshold = 30, mood_penalty = -10 },
-        sleep      = { drain = 2 * PER_HOUR, mood_threshold = 30, mood_penalty = -10 },
-        recreation = { drain = 8 * PER_HOUR, mood_threshold = 30, mood_penalty = -10 },
+        hunger     = { drain = 2 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
+        sleep      = { drain = 2 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
+        recreation = { drain = 8 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
     },
-    [Tier.SERF]    = { hunger = { drain = 2 * PER_HOUR, mood_threshold = 30, mood_penalty = -10 }, ... },
-    [Tier.FREEMAN] = { hunger = { drain = 3 * PER_HOUR, mood_threshold = 50, mood_penalty = -15 }, ... },
-    [Tier.GENTRY]  = { hunger = { drain = 4 * PER_HOUR, mood_threshold = 60, mood_penalty = -20 }, ... },
+    [Tier.SERF]    = { hunger = { drain = 2 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 }, ... },
+    [Tier.FREEMAN] = { hunger = { drain = 3 * PER_HOUR, soft_threshold = 50, hard_threshold = 20, mood_threshold = 50, mood_penalty = -15 }, ... },
+    [Tier.GENTRY]  = { hunger = { drain = 4 * PER_HOUR, soft_threshold = 60, hard_threshold = 25, mood_threshold = 60, mood_penalty = -20 }, ... },
 }
 
 JobConfig = {
@@ -407,34 +582,29 @@ IllnessConfig = {
 
 MalnourishedConfig = { damage = 0.3 * PER_HOUR, recovery = 0.5 * PER_HOUR }
 
-BuildingConfig = {
-    cottage           = { width = 3, height = 3, housing_tier = Tier.SERF,    build_cost = { logs = 40,  stone = 20 } },
-    house             = { width = 4, height = 3, housing_tier = Tier.FREEMAN, build_cost = { logs = 80,  stone = 50 } },
-    manor             = { width = 5, height = 4, housing_tier = Tier.GENTRY,  build_cost = { logs = 150, stone = 120 } },
-    farm_plot         = { width = 4, height = 4, build_cost = { logs = 10 } },
-    woodcutters_camp  = { width = 2, height = 2, build_cost = { logs = 20 } },
-    mine              = { width = 3, height = 3, build_cost = { logs = 40, stone = 30 } },
-    quarry            = { width = 3, height = 3, build_cost = { logs = 30 } },
-    gatherers_hut     = { width = 2, height = 2, build_cost = { logs = 15 } },
-    hunting_cabin     = { width = 2, height = 2, build_cost = { logs = 25 } },
-    fishing_dock      = { width = 2, height = 2, build_cost = { logs = 20 } },
-    mill              = { width = 3, height = 3, build_cost = { logs = 50, stone = 30 } },
-    bakery            = { width = 3, height = 3, build_cost = { logs = 40, stone = 20 } },
-    brewery           = { width = 3, height = 3, build_cost = { logs = 50, stone = 20 } },
-    tailors_shop      = { width = 3, height = 3, build_cost = { logs = 40, stone = 15 } },
-    smithy            = { width = 3, height = 3, build_cost = { logs = 30, stone = 40 } },
-    foundry           = { width = 4, height = 4, build_cost = { logs = 60, stone = 80 } },
-    jewelers_workshop = { width = 3, height = 3, build_cost = { logs = 40, stone = 30 } },
-    market            = { width = 4, height = 3, build_cost = { logs = 60, stone = 30 } },
-    church            = { width = 5, height = 4, build_cost = { logs = 80, stone = 60 } },
-    infirmary         = { width = 3, height = 3, build_cost = { logs = 50, stone = 30 } },
-    tavern            = { width = 4, height = 3, build_cost = { logs = 60, stone = 30 } },
-    school            = { width = 3, height = 3, build_cost = { logs = 50, stone = 20 } },
-    warehouse         = { width = 4, height = 3, build_cost = { logs = 80, stone = 40 } },
-    barracks          = { width = 4, height = 3, build_cost = { logs = 60, stone = 40 } },
-    watchtower        = { width = 2, height = 2, build_cost = { logs = 30, stone = 30 } },
-    town_hall         = { width = 5, height = 4, build_cost = { logs = 120, stone = 100 } },
-    library           = { width = 4, height = 3, build_cost = { logs = 80, stone = 50 } },
+ResourceConfig = {
+    logs       = { slot_size = 2 },
+    stone      = { slot_size = 2 },
+    iron       = { slot_size = 2 },
+    steel      = { slot_size = 2 },
+    gold       = { slot_size = 2 },
+    silver     = { slot_size = 2 },
+    gems       = { slot_size = 2 },
+    wheat      = { slot_size = 2 },
+    barley     = { slot_size = 2 },
+    flax       = { slot_size = 2 },
+    flour      = { slot_size = 2 },
+    bread      = { slot_size = 2 },
+    vegetables = { slot_size = 2 },
+    meat       = { slot_size = 2 },
+    fish       = { slot_size = 2 },
+    beer       = { slot_size = 2 },
+    clothing   = { slot_size = 2 },
+    herbs      = { slot_size = 2 },
+    tools      = { slot_size = 2 },
+    weapons    = { slot_size = 2 },
+    armor      = { slot_size = 2 },
+    jewelry    = { slot_size = 2 },
 }
 
 ResourceSpawnConfig = {
@@ -444,3 +614,5 @@ ResourceSpawnConfig = {
     artifacts  = { min_depth = 0.8  },
 }
 ```
+
+See CONTEXT.md for full BuildingConfig with input/output inventory definitions.

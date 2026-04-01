@@ -1,5 +1,5 @@
 # Sovereign — Design Document
-*Working title. Version 0.6*
+*Working title. Version 0.8*
 
 ---
 
@@ -33,7 +33,7 @@ DF depth without DF bloat. Systems should be rich enough to generate interesting
 ## Design Goals
 
 - Readable, intuitive UI — a direct response to DF's weaknesses
-- Mouse-driven PC controls
+- Mouse-driven PC controls (with potential for Steam Deck support)
 - Systems that remain engaging and legible at both small and large population sizes
 - Population cap of approximately 200 units
 - Multi-generational play within a single playthrough
@@ -84,9 +84,11 @@ One game_day = 10 real minutes at Normal speed (25 real seconds per game_hour).
 
 The game begins at **6:00 AM, Sunday, Spring, Year 1**.
 
+**Starting loadout:** 6 Serfs and 1 Knight (the leader, a Gentry unit). No buildings, no resources. Pure survival start.
+
 ### Event Speed Controls
 
-The player can configure auto-pause or auto-slowdown for specific event types (e.g., unit death, succession, Fey encounter, illness outbreak).
+The player can configure auto-pause or auto-slowdown for specific event types (e.g., unit death, succession, Fey encounter, illness outbreak, unit trapped).
 
 *Event type list and configuration UI are pending.*
 
@@ -132,25 +134,66 @@ When the leader dies, succession proceeds as follows:
 
 ---
 
+## Map
+
+Top-down 2D grid of tiles, procedurally generated from a seed. 400x200 tiles, 1-indexed. Single zone — no separate maps or regions.
+
+### Layout
+
+The left half (columns 1–200) is the settlement area with `forest_depth` 0.0. The right half (columns 201–400) is the forest, with `forest_depth` increasing linearly from 0.0 at column 201 to 1.0 at column 400. `forest_danger` is derived on demand as `depth²`.
+
+### Terrain
+
+Four terrain types: grass, dirt, rock, water. Grass and dirt are functionally equivalent — both are pathable. Rock is impassable. Water is impassable. Lakes are present; no rivers or flowing water. No elevation.
+
+### Fog of War
+
+The forest (and potentially parts of the settlement) begins unexplored. A two-layer visibility system reveals the map as units explore:
+
+- **Explored:** permanent flag, flipped when a unit first sees a tile. Unexplored tiles render as black.
+- **Visible:** real-time count of how many units can currently see a tile. Used for reveal events (enemy spotted, ruins discovered) and potentially for showing/hiding enemy unit activity.
+
+Visibility is computed via recursive shadowcasting from each unit's position. Vision is blocked by dense tree clusters (trees stage 2+ with at least one tree neighbor), buildings, and rock. Standalone trees do not block vision. The first blocking tile in a line of sight is visible; shadow falls behind it.
+
+*Map size, generation parameters, biome details, and starting layout are pending.*
+
+---
+
 ## The Forest
 
 The wilderness surrounding the settlement is not simply a resource zone — it is a place with its own character, rules, and inhabitants. It is the primary source of late-game mystery and opt-in escalation.
 
 ### Structure
 
-The forest exists on the same map as the settlement, not as a separate zone. The player starts on the left side of the map. The left half has a forest depth of 0.0. Starting at the midpoint, depth increases linearly to 1.0 at the far right edge. Danger scales quadratically (depth²).
+The forest exists on the same map as the settlement, not as a separate zone. Forest depth increases linearly from 0.0 at the settlement-forest boundary to 1.0 at the far right edge. Danger scales quadratically (depth²).
+
+### Trees
+
+Trees are dense in the forest — 70–85% coverage at map gen, with natural clearings that decrease in frequency as depth increases. The settlement area has sparse small clusters (3–8 trees).
+
+Trees block pathfinding (at stage 2+) and can be chopped down. The forest is a wall the player carves into. Deeper exploration requires logging effort, and the player's path network is player-authored through tree removal.
+
+### Tree Growth
+
+Trees have three growth stages: sapling (passable), young (blocking, reduced yield), and mature (blocking, full yield, can spread). Chopping removes the tree entirely — no automatic replanting.
+
+New saplings appear only through spreading from mature trees. A mature tree can spread to a random tile within manhattan distance 4. The forest slowly encroaches on the settlement using the same rules, creating pressure for the player to maintain cleared areas.
+
+Growth safety rules prevent saplings from spreading adjacent to buildings. Units can get trapped by converging growth — this is accepted as emergent gameplay ("losing is fun"), and the player is notified when it happens.
 
 ### Resources
 
 Forest resources are tiered by depth. Basic materials are available everywhere, rarer materials require venturing deeper. Some late-game systems, including magic, are gated behind deep resources.
 
+Herbs grow on forest tiles as tile data, spreading with similar logic to trees.
+
 ### Inhabitants
 
-The forest is home to animals, hostile human factions, ruins of unknown origin, and Fey.
+The forest is home to animals, hostile human factions, ruins of unknown origin, and Fey. Deer are wandering creatures that exist on the map and replenish over time.
 
 **The Fey** are the forest's defining presence. They are not straightforwardly evil — they are ancient, strange, and operating by their own logic. A unit with high Charisma sent as an envoy may achieve outcomes that warriors cannot.
 
-*Fey faction structure, specific encounter types, and the full range of bargaining outcomes are undecided.*
+*Fey faction structure, specific encounter types, and the full range of bargaining outcomes are undecided. Deer mechanics are deferred.*
 
 ### The Changeling Event
 
@@ -190,7 +233,7 @@ Three tiers: **Serf / Freeman / Gentry.** All tiers share the same underlying ru
 
 | Property | Effect |
 |---|---|
-| Needs profile | Higher tiers drain faster and have higher mood thresholds |
+| Needs profile | Higher tiers drain faster and have higher mood/interrupt thresholds |
 | Skills | Serfs cannot learn skills. Freeman and Gentry can. |
 | Job eligibility | T1 for any unit. T2 requires Freeman+. T3 requires Gentry. |
 | Mood penalties | Higher tiers are unhappy performing work below their tier |
@@ -299,11 +342,18 @@ School vs. work is a binary assignment on the unit's job priority UI. Choosing s
 
 ## Needs System
 
-Three needs: **hunger, sleep, recreation.** Values range 0–100, draining over time. Refilled by self-assigned behavior (eating at home, sleeping at home, visiting the tavern). Needs bypass the job queue — when critical, the unit interrupts work.
+Three needs: **hunger, sleep, recreation.** Values range 0–100, draining over time. Refilled by self-assigned behavior (eating at home, sleeping at home, visiting the tavern).
+
+### Interrupt Levels
+
+Needs trigger interrupts at two thresholds:
+
+- **Soft interrupt:** need drops below `soft_threshold`. Worker finishes current delivery before handling the need. A woodcutter carrying logs completes the trip, deposits, then goes to eat.
+- **Hard interrupt:** need drops below `hard_threshold`. Worker drops everything immediately. A starving unit abandons their current task.
+
+Thresholds are configured per need per tier in NeedsConfig. Needs are never posted as jobs — units self-assign need behavior directly.
 
 Spirituality is not a need — it is handled by the scheduled Sunday church service.
-
-Drain rates, mood thresholds, and mood penalty values are tier-specific. Children have a faster recreation drain rate.
 
 ---
 
@@ -350,9 +400,9 @@ Three condition types: **Injury**, **Illness**, **Malnourished**. See CONTEXT.md
 
 ### Core Model
 
-- **Single global job queue.** Tasks posted by the world.
-- **Units poll the queue** when idle, filtered by tier and skill eligibility.
-- **Needs bypass the queue.** Critical needs trigger self-assigned behavior.
+- **Single global job queue.** All job types (regular work and hauling) share one flat array. Jobs have a `type` field; units scan filtered by eligibility and personal priority settings.
+- **Units poll the queue** when idle, filtered by tier and skill eligibility. Ties broken by distance.
+- **Needs bypass the queue.** Need interrupts trigger self-assigned behavior.
 - **Job output quality** scales with attribute (T1) or attribute + skill (T2/T3).
 - **Progress persists on abandonment.**
 
@@ -365,9 +415,111 @@ Three condition types: **Injury**, **Illness**, **Malnourished**. See CONTEXT.md
 | Low | 1 | Background tasks |
 | Disabled | 0 | Unit will not pull this job category |
 
-### Hauling
+### Worker Limits
 
-Workers own their full job cycle. No separate hauling job type. Carry capacity derived from Strength.
+Gathering and production buildings have a `max_workers` from config and a player-adjustable `worker_limit` clamped to that max. The player can set `worker_limit` to 0 to effectively shut a building down without deconstructing it.
+
+### Resource Claiming
+
+When a worker targets a map resource (tree, herb), the tile is claimed via `tile.claimed_by = unit_id`. Other workers skip claimed tiles when searching. Claim is cleared on completion, abandonment, or unit death.
+
+---
+
+## Resource Gathering
+
+### Building Work Patterns
+
+Three patterns, all sharing the same inventory model:
+
+**Hub gathering (woodcutter's camp, gatherer's hut, hunting cabin).** Worker cycle starts and ends at the hub building. On each cycle, the worker checks if building output storage exceeds a threshold. If yes, they carry (not haul) a load to the nearest stockpile. If no, they find the nearest valid unclaimed resource, claim it, travel, gather, return, and deposit. No work radius — workers search the full map.
+
+**Stationary extraction (mine, quarry, dock).** Worker goes to the building and works on site. Resources accumulate in building output inventory continuously while the worker is present. Placement terrain requirements: mine needs one edge entirely on rock, dock needs one edge entirely on water.
+
+**Production crafting (smithy, bakery, etc.).** See Production System below.
+
+---
+
+## Production System
+
+Production buildings have separate input and output inventories. The worker cycle:
+
+1. Check if output storage exceeds threshold → carry output to nearest stockpile
+2. Check if work-in-progress exists → resume crafting
+3. If no WIP, check if input has materials → start new craft (consume from input, create WIP)
+4. If no materials in input → search queue for unclaimed pull job matching this building and resource; if found, claim it and fetch from source; if not found, self-fetch from nearest stockpile
+
+### Work-in-Progress
+
+Materials are consumed from input when crafting begins. The WIP persists on the building if the worker is interrupted. Any worker assigned to the building can resume it. When progress reaches completion, output is added to the building's output inventory and the WIP is cleared.
+
+### Carrying and Offloading
+
+Units carry one resource type at a time. Carrying is part of the worker's primary job cycle (a woodcutter carrying logs to camp, a smith carrying iron from a stockpile), distinct from dedicated hauling jobs.
+
+**Offloading** occurs when a worker carrying resources is reassigned to a different job type. They deposit to the nearest stockpile before starting the new job. If no stockpile has capacity, resources are lost and the player is notified. If a worker returns to the same job type after an interrupt and is still carrying resources, they resume at the delivery phase of their cycle.
+
+---
+
+## Inventory and Storage
+
+### Slot-Based Inventory
+
+Stockpiles and building inventories use a shared slot model. Each slot holds a single resource type with a capacity determined by `slot_capacity / resource_slot_size`. When depositing, fill an existing slot of that resource type first. If full, use an empty slot. If no empty slots or filter limit reached, reject.
+
+### Stockpiles
+
+Player-placed, player-defined dimensions. Slot count equals tile footprint (width × height). Slot capacity is `SLOT_CAPACITY` (20). Player-configurable filters with per-resource slot limits (default: accept all, max slots = total slot count).
+
+### Warehouses
+
+Fixed size (4×4), 16 slots at `WAREHOUSE_SLOT_CAPACITY` (60) per slot. Player-configurable filters, same as stockpiles.
+
+### Building Inventories
+
+Production and gathering buildings have separate input and output inventories. Slot count, capacity, and accepted resources defined per building type in config. Building filters are fixed by type, not player-configurable.
+
+### Households
+
+Simple named fields with per-type capacity limits. Not part of the slot system.
+
+### Global Resource Display
+
+The UI shows a total per resource type, computed by summing all stockpile slots, building inventory slots, household stores, and unit carrying amounts. Recomputed on demand, not stored state.
+
+---
+
+## Hauling System
+
+### Terminology
+
+| Term | Meaning |
+|---|---|
+| **Hauler** | Dedicated T1 job. Claims hauling jobs from the queue. |
+| **Hauling system** | Scans building outputs/inputs and stockpiles. Posts hauling jobs based on player-configured rules. |
+| **Hauling job** | A job in the global queue to move one trip of resources between two locations. |
+| **Hauling rule** | Player-configured push/pull threshold on a stockpile or building. |
+| **Carrying** | Worker transporting resources as part of their primary job cycle. Not a hauling job. |
+| **Offloading** | Depositing carried resources when switching job types. |
+
+### Resource Flow
+
+All resource redistribution flows through stockpiles as intermediaries. No direct building-to-building hauling. A production chain like mill → bakery goes: mill output → stockpile → bakery input.
+
+### Job Posting
+
+The hauling system scans periodically and posts jobs based on deficit:
+- **Push:** building output exceeds threshold → post jobs to move resources to a stockpile
+- **Pull:** building input is below threshold → post jobs to move resources from a stockpile
+
+Job count is deficit-based: enough jobs are posted to cover the deficit minus estimated resources already in transit. Each job represents one trip and doesn't specify an amount — the hauler picks up as much as they can carry.
+
+### Validation
+
+Haulers validate conditions when claiming a job (source still has resources, destination still has capacity/need). Stale jobs are discarded.
+
+### Worker Interaction
+
+Production workers at step 4 of their cycle can claim unclaimed pull jobs targeting their building. This counts toward active jobs in the deficit calculation and prevents duplicate hauler trips.
 
 ---
 
@@ -393,17 +545,6 @@ Units without a home assignment eat from a communal stockpile directly. Mood pen
 - **Clothing** — tier-appropriate. Missing or wrong-tier = mood penalty.
 - **Beer** — consumed at the Tavern, not at home.
 - **Jewelry** — Gentry luxury good. Absence = Gentry mood penalty.
-
----
-
-## Mover System
-
-Movers redistribute resources between stockpiles via player-configured rules:
-
-- **Push:** when source exceeds threshold, post jobs for excess
-- **Pull:** when target is below threshold, post jobs to pull from source
-
-Mover jobs go through the global job queue.
 
 ---
 
@@ -485,14 +626,14 @@ Interior positions (beds) defined in building config, created on construction co
 
 ### Resource Extraction
 
-| Building | Job | Output |
-|---|---|---|
-| Woodcutter's Camp | Woodcutter (T1) | Logs |
-| Mine | Miner (T1) | Iron, rare gold/silver/gems |
-| Quarry | Stonecutter (T1) | Stone |
-| Gatherer's Hut | Gatherer (T1) | Vegetables (limited by natural supply) |
-| Hunting Cabin | Huntsman (T2) | Meat (limited by deer population) |
-| Fishing Dock | Fisher (T1) | Fish (limited by water access) |
+| Building | Job | Output | Placement |
+|---|---|---|---|
+| Woodcutter's Camp | Woodcutter (T1) | Logs | Pathable ground |
+| Mine | Miner (T1) | Iron, rare gold/silver/gems | One edge on rock |
+| Quarry | Stonecutter (T1) | Stone | Pathable ground |
+| Gatherer's Hut | Gatherer (T1) | Vegetables | Pathable ground |
+| Hunting Cabin | Huntsman (T2) | Meat | Pathable ground |
+| Fishing Dock | Fisher (T1) | Fish | One edge on water |
 
 ### Processing
 
@@ -535,8 +676,8 @@ Units visit the Tavern to fulfill recreation need. Without a barkeep, units soci
 
 | Building | Notes |
 |---|---|
-| Stockpile | Free, outdoor, limited capacity |
-| Warehouse | Built, indoor, higher capacity |
+| Stockpile | Free, outdoor, player-defined dimensions, slot count = footprint tiles |
+| Warehouse | Built, 4×4, 16 slots at higher capacity |
 
 ### Military
 
@@ -554,18 +695,21 @@ Units visit the Tavern to fulfill recreation need. Without a barkeep, units soci
 
 ---
 
-## Map
+## Notifications
 
-Top-down 2D grid of tiles, procedurally generated. Single-zone. Player starts on the left half. Forest occupies the right half. Forest depth fixed at map gen.
+The game notifies the player of important events. Some notifications can be configured to auto-pause or auto-slowdown via event speed controls.
 
-*Map size, generation parameters, and biome details are undecided.*
+Current notification types:
+- Unit trapped (failed to path to any valid destination)
+- Storage full, resources lost (offloading failed)
+
+*Additional notification types pending.*
 
 ---
 
 ## Sections Pending Design
 
-- **Economy details** — stockpile data model, tool requirements, resource weights
-- **Map and world generation** — parameters, biomes, starting conditions
+- **Map and world generation** — seed, parameters, biomes, starting layout and loadout
 - **UI/UX architecture** — interface design, information hierarchy, management tools
 - **Dynasty/succession implementation** — traversal, regency mechanics
 - **Event system** — Changeling, Fey encounters, random occurrences
@@ -573,5 +717,6 @@ Top-down 2D grid of tiles, procedurally generated. Single-zone. Player starts on
 - **Combat** — mechanics, military behavior, threat types
 - **Fey encounter mechanics** — faction structure, bargaining outcomes
 - **Magic system implementation** — spells, miracles, mechanical scope
+- **Deer mechanics** — movement, replenishment, hunting interaction
 - **Animal husbandry** — livestock, pastures (deferred)
 - **External trade** — caravans, external economy (scope TBD)
