@@ -2,7 +2,6 @@
 -- Owns the tile grid, buildings, forest depth map, plant cursor scan,
 -- growing plant data, and visibility state.
 
-require("config.constants")
 
 local log = require("core.log")
 
@@ -68,6 +67,7 @@ function world:generate()
                 plant_growth  = 0,
                 building_id   = nil,
                 forest_depth  = depth,
+                danger = depth ^ 2,
                 is_explored   = false,
                 visible_count = 0,
                 claimed_by    = nil,
@@ -105,7 +105,7 @@ function world:generate()
             local tile = self:getTile(c[1] + math_random(-4, 4), c[2] + math_random(-4, 4))
             if tile and tile.terrain == "grass" and tile.plant_growth == 0 then
                 tile.plant_type  = "tree"
-                tile.plant_growth = 3
+                tile.plant_growth = math_random(2, 3)
             end
         end
     end

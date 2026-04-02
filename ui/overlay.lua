@@ -2,13 +2,10 @@
 -- Developer overlay. Toggled with F3 via the input system.
 -- Draws stats bar, tile inspector on cursor hover, and log tail.
 
-require("config.constants")
 
 local log = require("core.log")
 
-local overlay = {
-    is_visible = false,
-}
+local overlay = { is_visible = false }
 
 local FONT_SIZE   = 12
 local LINE_HEIGHT = 14
@@ -16,6 +13,7 @@ local PAD         = 6
 local BG          = { 0, 0, 0, 0.7 }
 local TEXT        = { 1, 1, 1, 1   }
 local DIM         = { 0.7, 0.7, 0.7, 1 }
+local font = love.graphics.newFont(FONT_SIZE)
 
 --- Toggle the overlay on/off.
 function overlay:toggle()
@@ -28,7 +26,7 @@ function overlay:draw(time, units_mod, world_mod, jobqueue_mod, camera_mod)
     if self.is_visible == false then return end
 
     local w = love.graphics.getWidth()
-    local font = love.graphics.newFont(FONT_SIZE)
+
     love.graphics.setFont(font)
 
     -- -----------------------------------------------------------------------
@@ -47,7 +45,7 @@ function overlay:draw(time, units_mod, world_mod, jobqueue_mod, camera_mod)
 
     local bar_h = PAD * 2 + #stats * LINE_HEIGHT
     love.graphics.setColor(BG)
-    love.graphics.rectangle("fill", 0, 0, w, bar_h)
+    love.graphics.rectangle("fill", 0, 0, 320, bar_h)
     love.graphics.setColor(TEXT)
     for i, line in ipairs(stats) do
         love.graphics.print(line, PAD, PAD + (i - 1) * LINE_HEIGHT)
@@ -67,13 +65,11 @@ function overlay:draw(time, units_mod, world_mod, jobqueue_mod, camera_mod)
         local info = {
             string.format("Tile (%d, %d)", tx, ty),
             string.format("terrain: %s", tile.terrain),
-            string.format("plant: %s  growth: %d",
-                tile.plant_type or "none", tile.plant_growth),
-            string.format("forest_depth: %.2f", tile.forest_depth),
+            string.format("plant: %s  growth: %d", tile.plant_type or "none", tile.plant_growth),
+            string.format("forest_depth: %.2f  danger: %.2f", tile.forest_depth, tile.danger),
             string.format("building_id: %s", tostring(tile.building_id)),
             string.format("claimed_by: %s",  tostring(tile.claimed_by)),
-            string.format("explored: %s  visible: %d",
-                tostring(tile.is_explored), tile.visible_count),
+            string.format("explored: %s  visible: %d", tostring(tile.is_explored), tile.visible_count),
         }
 
         -- Unit inspector: append stats if a unit occupies this tile.
@@ -87,25 +83,19 @@ function overlay:draw(time, units_mod, world_mod, jobqueue_mod, camera_mod)
         end
         if hovered_unit ~= nil then
             local u = hovered_unit
-            local tier_name = ({ [Tier.SERF] = "Serf", [Tier.FREEMAN] = "Freeman",
-                                  [Tier.GENTRY] = "Gentry" })[u.tier] or "?"
+            local tier_name = (TIER_NAMES)[u.tier] or "?"
             info[#info + 1] = "---"
-            info[#info + 1] = string.format("%s  [%s]%s",
-                u.name, tier_name, u.is_leader and "  LEADER" or "")
-            info[#info + 1] = string.format("id=%d  age=%d  dead=%s  drafted=%s",
-                u.id, u.age, tostring(u.is_dead), tostring(u.is_drafted))
-            info[#info + 1] = string.format("satiation=%.1f  energy=%.1f  recreation=%.1f",
-                u.needs.satiation, u.needs.energy, u.needs.recreation)
-            info[#info + 1] = string.format("mood=%.1f  health=%.1f",
-                u.mood, u.health)
-            info[#info + 1] = string.format("activity=%s  job=%s",
-                tostring(u.current_activity), tostring(u.current_job_id))
+            info[#info + 1] = string.format("%s - %s - %s%s", u.name, tier_name, GENDER_NAMES[u.is_male], u.is_leader and " - LEADER" or "")
+            info[#info + 1] = string.format("id=%d  age=%d  dead=%s  drafted=%s", u.id, u.age, tostring(u.is_dead), tostring(u.is_drafted))
+            info[#info + 1] = string.format("satiation=%.1f  energy=%.1f  recreation=%.1f", u.needs.satiation, u.needs.energy, u.needs.recreation)
+            info[#info + 1] = string.format("mood=%.1f  health=%.1f", u.mood, u.health)
+            info[#info + 1] = string.format("activity=%s  job=%s", tostring(u.current_activity), tostring(u.current_job_id))
         end
 
-        local box_w = 200
+        local box_w = 320
         local box_h = PAD * 2 + #info * LINE_HEIGHT
         local bx    = math.min(mx + 16, w - box_w - PAD)
-        local by    = math.max(bar_h + PAD, my - box_h / 2)
+        local by    = math.max(bar_h + PAD, my)
 
         love.graphics.setColor(BG)
         love.graphics.rectangle("fill", bx, by, box_w, box_h)
@@ -123,7 +113,7 @@ function overlay:draw(time, units_mod, world_mod, jobqueue_mod, camera_mod)
     local screen_h = love.graphics.getHeight()
 
     love.graphics.setColor(BG)
-    love.graphics.rectangle("fill", 0, screen_h - log_h, w / 2, log_h)
+    love.graphics.rectangle("fill", 0, screen_h - log_h, 600, log_h)
     love.graphics.setColor(DIM)
     for i, entry in ipairs(tail) do
         local line = string.format("[%s] %s %s: %s",

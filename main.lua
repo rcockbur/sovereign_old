@@ -4,12 +4,13 @@ if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then
 end
 
 -- Config globals must be set before any module that reads them is loaded.
-require("config.constants")
-require("config.needs")
-require("config.health")
-require("config.jobs")
-require("config.resources")
-require("config.buildings")
+require("config.constants_config")
+require("config.names_config")
+require("config.needs_config")
+require("config.health_config")
+require("config.jobs_config")
+require("config.resources_config")
+require("config.buildings_config")
 
 local gamestate  = require("core.gamestate")
 local log        = require("core.log")
@@ -53,8 +54,7 @@ local function newGame()
     units:create({ x = sx + 2, y = sy + 2, tier = Tier.SERF })
     units:create({ x = sx + 4, y = sy + 2, tier = Tier.SERF })
 
-    local leader = units:create({ x = sx + 2, y = sy - 2, tier = Tier.GENTRY,
-                                   name = "Edmund" })
+    local leader = units:create({ x = sx + 2, y = sy - 2, tier = Tier.GENTRY })
     dynasty:appoint(leader)
 
     camera.x    = sx + 2
@@ -93,8 +93,8 @@ function gamestate.main_menu:draw()
 
     love.graphics.setFont(love.graphics.newFont(16))
     love.graphics.setColor(0.75, 0.75, 0.75)
-    love.graphics.printf("N  —  New Game", 0, h * 0.55, w, "center")
-    love.graphics.printf("Escape  —  Quit", 0, h * 0.62, w, "center")
+    love.graphics.printf("New Game (N)", 0, h * 0.55, w, "center")
+    love.graphics.printf("Quit (Esc)", 0, h * 0.62, w, "center")
 
     love.graphics.setColor(1, 1, 1, 1)
 end

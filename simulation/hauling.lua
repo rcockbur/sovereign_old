@@ -5,7 +5,6 @@
 -- Pull: building input is below threshold → post job to fetch from stockpile.
 -- Stub: scan structure is real; posting logic waits for inventory (Phase 6).
 
-require("config.constants")
 
 local world    = require("core.world")
 local jobqueue = require("simulation.jobqueue")

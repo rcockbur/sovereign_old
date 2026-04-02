@@ -2,9 +2,6 @@
 -- Building factory and worker management. Three work patterns stubbed as
 -- state machine hooks: hub gathering, stationary extraction, production crafting.
 
-require("config.constants")
-require("config.buildings")
-
 local registry = require("core.registry")
 local world    = require("core.world")
 local log      = require("core.log")

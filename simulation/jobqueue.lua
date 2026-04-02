@@ -3,9 +3,6 @@
 -- World and hauling system post jobs; units query and claim them.
 -- Swap-and-pop deletion on completion or discard.
 
-require("config.constants")
-require("config.jobs")
-
 local registry = require("core.registry")
 local log      = require("core.log")
 

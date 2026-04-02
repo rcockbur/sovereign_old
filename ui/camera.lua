@@ -2,7 +2,6 @@
 -- Camera state: position (world-space tile coords) and zoom.
 -- Provides coordinate conversion between screen pixels and world tiles.
 
-require("config.constants")
 
 local camera = {
     x    = 1.0,   -- world-space tile column the camera is centered on
@@ -10,7 +9,7 @@ local camera = {
     zoom = 1.0,   -- 1.0 = TILE_SIZE pixels per tile
 }
 
-local PAN_SPEED = 8  -- tiles per second
+local PAN_SPEED = 30  -- tiles per second
 
 --- Pan the camera by (dx, dy) tiles. Clamps to map bounds.
 function camera:pan(dx, dy)

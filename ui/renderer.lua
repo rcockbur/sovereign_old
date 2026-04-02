@@ -4,7 +4,6 @@
 -- Fog of war: black = unexplored, dimmed = explored-not-visible, full = visible.
 -- Camera transform is applied by the caller (camera:attach / camera:detach).
 
-require("config.constants")
 
 -- ---------------------------------------------------------------------------
 -- Color palette

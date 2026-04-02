@@ -3,9 +3,6 @@
 -- Called from unit:update once per HASH_INTERVAL ticks, so rates are
 -- multiplied by HASH_INTERVAL to apply the correct per-tick delta.
 
-require("config.constants")
-require("config.needs")
-
 local math_max = math.max
 
 local needs = {}

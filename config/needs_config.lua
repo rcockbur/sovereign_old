@@ -1,8 +1,6 @@
 -- config/needs.lua
 -- NeedsConfig: drain rates and thresholds per tier. All rates are per-tick.
 
-require("config.constants")
-
 NeedsConfig = {
     child = {
         satiation  = { drain = 2 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },

@@ -2,7 +2,6 @@
 -- Scheduled and triggered events: Sunday service, funerals, weddings.
 -- Changeling and Fey are placeholder stubs for future content.
 
-require("config.constants")
 
 local log = require("core.log")
 

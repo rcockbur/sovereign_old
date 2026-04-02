@@ -2,7 +2,6 @@
 -- The onTick orchestrator. Calls module update functions in order.
 -- Owns no data.
 
-require("config.constants")
 
 local world   = require("core.world")
 local units   = require("simulation.unit")

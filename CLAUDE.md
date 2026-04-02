@@ -51,7 +51,7 @@ Stack-based in `core/gamestate.lua`. States: `loading`, `main_menu`, `playing`. 
 - `camelCase` for functions
 - String identifiers for equality-only checks (modifier sources, skill names, illness names, activity types, crop types, resource types, plant types)
 - Integer constants for ordered/comparable values (tier, priority, job tier, plant growth stage)
-- All boolean fields use `is_` or `has_` prefix, no exceptions. `is_` for states/properties, `has_` for possession/presence.
+- All boolean fields use `is_`, `has_`, `in_`, or `can_` prefix, no exceptions. `is_` for states/properties, `has_` for possession/presence, `in_` for membership/containment, `can_` for capability/permission.
 
 ### Method Syntax
 - Colon (`:`) for method definitions and calls — anything with `self`

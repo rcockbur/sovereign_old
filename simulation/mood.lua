@@ -3,9 +3,6 @@
 -- mood = sum of stored decaying modifiers + sum of calculated modifiers.
 -- Stored modifiers tick down by 1 per hash update and are removed when expired.
 
-require("config.constants")
-require("config.needs")
-
 local mood = {}
 
 --- Tick down all stored modifiers. Remove any that have expired.

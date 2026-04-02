@@ -2,7 +2,6 @@
 -- Household creation and member management. Tied to housing buildings.
 -- Consumption checks stubbed for Phase 11.
 
-require("config.constants")
 
 local log = require("core.log")
 

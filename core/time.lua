@@ -2,7 +2,6 @@
 -- Owns the clock. Drives the tick accumulator and speed multiplier.
 -- Does not know about any other system.
 
-require("config.constants")
 
 local time = {
     speed       = Speed.NORMAL,

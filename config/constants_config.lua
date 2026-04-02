@@ -68,6 +68,3 @@ TILE_SIZE = 32
 ZOOM_MIN  = 0.5
 ZOOM_MAX  = 2.0
 
--- Names
-DAY_NAMES    = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
-SEASON_NAMES = { "Spring", "Summer", "Autumn", "Winter" }

@@ -2,7 +2,6 @@
 -- ResourceConfig: slot_size per resource type (units per slot = slot_capacity / slot_size).
 -- ResourceSpawnConfig: minimum forest_depth required to spawn each resource category.
 
-require("config.constants")
 
 ResourceConfig = {
     logs     = { slot_size = 2 },

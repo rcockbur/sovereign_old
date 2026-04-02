@@ -1,8 +1,6 @@
 -- config/jobs.lua
 -- JobConfig and ChildJobs.
 
-require("config.constants")
-
 JobConfig = {
     -- T1: any tier, attribute only, no skill cap
     hauler      = { job_tier = JobTier.T1, attribute = "strength"                                        },

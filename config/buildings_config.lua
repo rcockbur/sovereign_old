@@ -2,8 +2,6 @@
 -- BuildingConfig: dimensions, costs, worker limits, inventories, hauling rules.
 -- Separate from constants.lua for readability. Sets BuildingConfig global.
 
-require("config.constants")
-
 BuildingConfig = {
     -- Storage
     stockpile = {

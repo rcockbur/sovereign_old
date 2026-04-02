@@ -1,7 +1,6 @@
 -- config/health.lua
 -- InjuryConfig, IllnessConfig, MalnourishedConfig. All rates are per-tick.
 
-require("config.constants")
 
 InjuryConfig = {
     bruised = { initial_damage = 10, recovery = 0.5  * PER_HOUR },

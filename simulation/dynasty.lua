@@ -2,7 +2,6 @@
 -- Leader tracking and succession logic.
 -- Succession order: eldest living adult Gentry child → any living adult Gentry.
 
-require("config.constants")
 
 local registry = require("core.registry")
 local log      = require("core.log")

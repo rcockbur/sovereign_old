@@ -3,7 +3,6 @@
 -- Returns the `units` collection module. Individual units use the Unit prototype
 -- for per-unit methods.
 
-require("config.constants")
 
 local registry = require("core.registry")
 local log      = require("core.log")
@@ -14,12 +13,6 @@ local health   = require("simulation.health")
 local jobqueue = require("simulation.jobqueue")
 local dynasty  = require("simulation.dynasty")
 
-local FIRST_NAMES = {
-    "Aldric", "Bran", "Cedric", "Dunstan", "Edric",
-    "Godwin", "Hild", "Isolde", "Leofric", "Mildred",
-    "Oswin", "Rowena", "Sigebert", "Theda", "Wulfric",
-    "Aelfreda", "Cynric", "Eadgyth", "Frithuric", "Gytha",
-}
 
 local math_random = math.random
 
@@ -30,8 +23,9 @@ local math_random = math.random
 local Unit = {}
 Unit.__index = Unit
 
-function Unit:update(time)
+function Unit:onHash(time)
     -- Step 1: Drain needs
+    --log:info("UNIT", "%s still alive on tick %d", self.name, time.tick)
     needs.drain(self, time)
 
     if self.is_drafted == false then
@@ -78,9 +72,13 @@ local units = {
 
 --- Create a new unit, insert into registry and units.all, and return it.
 function units:create(params)
+    local is_male = params.is_male ~= nil and params.is_male or (math_random(2) == 1)
+    local name = params.name or (is_male and MALE_NAMES[math_random(#MALE_NAMES)] or FEMALE_NAMES[math_random(#FEMALE_NAMES)])
+
     local unit = setmetatable({
-        id   = registry:nextId(),
-        name = params.name or FIRST_NAMES[math_random(#FIRST_NAMES)],
+        id      = registry:nextId(),
+        is_male = is_male,
+        name    = name,
         tier = params.tier or Tier.SERF,
 
         is_dead    = false,
@@ -143,8 +141,7 @@ function units:create(params)
 
     registry:insert(unit)
     table.insert(self.all, unit)
-    log:info("UNIT", "created %s (id=%d, tier=%d) at (%d,%d)",
-        unit.name, unit.id, unit.tier, unit.x, unit.y)
+    log:info("UNIT", "created %s (id=%d, tier=%d) at (%d,%d)", unit.name, unit.id, unit.tier, unit.x, unit.y)
     return unit
 end
 
@@ -154,7 +151,7 @@ function units:update(time)
         local unit = self.all[i]
         if unit.is_dead == false then
             if (time.tick + time:hashOffset(unit.id)) % HASH_INTERVAL == 0 then
-                unit:update(time)
+                unit:onHash(time)
             end
         end
     end

@@ -4,9 +4,6 @@
 -- Modifier values are <= 0; they increase toward 0 as the unit recovers.
 -- Death fires when health <= 0.
 
-require("config.constants")
-require("config.health")
-
 local math_max    = math.max
 local math_min    = math.min
 local math_random = math.random
@@ -71,17 +68,17 @@ function health.recalculate(unit, time)
     local i = 1
     while i <= #unit.health_modifiers do
         local mod     = unit.health_modifiers[i]
-        local expired = false
+        local is_expired = false
 
         if mod.type == "injury" then
-            expired = tickInjury(mod)
+            is_expired = tickInjury(mod)
         elseif mod.type == "illness" then
-            expired = tickIllness(mod)
+            is_expired = tickIllness(mod)
         elseif mod.type == "malnourished" then
-            expired = tickMalnourished(mod, unit)
+            is_expired = tickMalnourished(mod, unit)
         end
 
-        if expired then
+        if is_expired then
             unit.health_modifiers[i] = unit.health_modifiers[#unit.health_modifiers]
             unit.health_modifiers[#unit.health_modifiers] = nil
         else
