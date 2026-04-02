@@ -1,5 +1,5 @@
 # Sovereign — Design Document
-*Working title. Version 0.8*
+*Working title. Version 0.9*
 
 ---
 
@@ -52,9 +52,9 @@ DF depth without DF bloat. Systems should be rich enough to generate interesting
 
 ### Calendar
 
-- 1 game_year = 4 seasons (Spring, Summer, Autumn, Winter)
-- 1 season = 7 days (Sunday through Saturday)
-- 1 day = 24 game_hours
+- 1 game_year = 4 game_seasons (Spring, Summer, Autumn, Winter)
+- 1 game_season = 7 game_days (Sunday through Saturday)
+- 1 game_day = 24 game_hours
 - 1 game_hour = 60 game_minutes
 
 Game_minutes are an internal config unit, not shown to the player. The smallest player-facing time unit is the game_hour.
@@ -104,11 +104,11 @@ Surviving the first winter is an intended milestone. Subsequent winters become p
 
 ## Aging
 
-Units age 1 life-year per season (4 life-years per calendar year). A unit born on Day 3 of Spring ages up when Day 3 of Summer arrives, then again on Day 3 of Autumn, and so on — each unit ages on their own birth-season anniversary, not all at once.
+Units age 1 life-year per game_season (4 life-years per calendar game_year). A unit born on Day 3 of Spring ages up when Day 3 of Summer arrives, then again on Day 3 of Autumn, and so on — each unit ages on their own birth-season anniversary, not all at once.
 
-Adulthood is reached at age 16 (4 calendar years / 16 seasons from birth). Average lifespan is approximately 60 life-years (~15 calendar years).
+Adulthood is reached at age 16 (4 calendar game_years / 16 game_seasons from birth). Average lifespan is approximately 60 life-years (~15 calendar game_years).
 
-A generation — the time between a leader taking power and their heir succeeding them — is roughly 8–10 calendar years. At Fast speed (x2), this translates to roughly 9–12 real hours of play, spread across multiple sessions.
+A generation — the time between a leader taking power and their heir succeeding them — is roughly 8–10 calendar game_years. At Fast speed (x2), this translates to roughly 9–12 real hours of play, spread across multiple sessions.
 
 ---
 
@@ -127,10 +127,10 @@ As the settlement grows, the leader may take on the title of baron. This is prim
 When the leader dies, succession proceeds as follows:
 
 1. **Primogeniture.** The eldest child inherits. Gender does not affect succession.
-2. **Regency.** If the heir is a child (under 16), an appointed Gentry unit serves as regent until the heir comes of age.
+2. **Child leader.** If the heir is a child (under 16), they inherit immediately. A child leader can't perform T3 jobs until they come of age, and they have child need profiles — but they are the leader. This creates dramatic moments (a 12-year-old baron struggling to hold things together).
 3. **No family heir.** If no family heir exists, an existing Gentry unit inherits the leadership role.
 
-*Detailed succession traversal and regency mechanics are pending.*
+*Detailed succession traversal mechanics are pending.*
 
 ---
 
@@ -153,7 +153,7 @@ The forest (and potentially parts of the settlement) begins unexplored. A two-la
 - **Explored:** permanent flag, flipped when a unit first sees a tile. Unexplored tiles render as black.
 - **Visible:** real-time count of how many units can currently see a tile. Used for reveal events (enemy spotted, ruins discovered) and potentially for showing/hiding enemy unit activity.
 
-Visibility is computed via recursive shadowcasting from each unit's position. Vision is blocked by dense tree clusters (trees stage 2+ with at least one tree neighbor), buildings, and rock. Standalone trees do not block vision. The first blocking tile in a line of sight is visible; shadow falls behind it.
+Visibility is computed via recursive shadowcasting from each unit's position. Vision is blocked by dense tree clusters (trees at stage 2+ with at least one tree neighbor), buildings, and rock. Standalone trees do not block vision. Herbs and berry bushes never block vision. The first blocking tile in a line of sight is visible; shadow falls behind it.
 
 *Map size, generation parameters, biome details, and starting layout are pending.*
 
@@ -169,23 +169,23 @@ The forest exists on the same map as the settlement, not as a separate zone. For
 
 ### Trees
 
-Trees are dense in the forest — 70–85% coverage at map gen, with natural clearings that decrease in frequency as depth increases. The settlement area has sparse small clusters (3–8 trees).
+Trees are dense in the forest — 70–85% coverage at map gen, with natural clearings distributed uniformly at all depths. The settlement area has sparse small clusters (3–8 trees).
 
 Trees block pathfinding (at stage 2+) and can be chopped down. The forest is a wall the player carves into. Deeper exploration requires logging effort, and the player's path network is player-authored through tree removal.
 
-### Tree Growth
+### Plants
 
-Trees have three growth stages: sapling (passable), young (blocking, reduced yield), and mature (blocking, full yield, can spread). Chopping removes the tree entirely — no automatic replanting.
+Three plant types exist as tile data: trees, herbs, and berry bushes. All share growth stages (seedling → young → mature) and spreading mechanics.
 
-New saplings appear only through spreading from mature trees. A mature tree can spread to a random tile within manhattan distance 4. The forest slowly encroaches on the settlement using the same rules, creating pressure for the player to maintain cleared areas.
+- **Trees** block pathing at stage 2+. Chopping destroys them permanently — new trees come only from mature tree spreading. Primary source of logs.
+- **Herbs** never block pathing. Gathering resets them to seedling (regrowth). Gated by forest depth — not found in the settlement area. Used for medicine.
+- **Berry bushes** never block pathing. Gathering resets them to seedling (regrowth). Found everywhere including the settlement area. Primary food source for gatherers.
 
-Growth safety rules prevent saplings from spreading adjacent to buildings. Units can get trapped by converging growth — this is accepted as emergent gameplay ("losing is fun"), and the player is notified when it happens.
+Growth safety rules prevent seedlings from spreading adjacent to buildings. Units can get trapped by converging tree growth — this is accepted as emergent gameplay ("losing is fun"), and the player is notified when it happens.
 
 ### Resources
 
 Forest resources are tiered by depth. Basic materials are available everywhere, rarer materials require venturing deeper. Some late-game systems, including magic, are gated behind deep resources.
-
-Herbs grow on forest tiles as tile data, spreading with similar logic to trees.
 
 ### Inhabitants
 
@@ -238,6 +238,8 @@ Three tiers: **Serf / Freeman / Gentry.** All tiers share the same underlying ru
 | Job eligibility | T1 for any unit. T2 requires Freeman+. T3 requires Gentry. |
 | Mood penalties | Higher tiers are unhappy performing work below their tier |
 
+All skill keys are present on every unit at 0 regardless of tier. The tier gate is enforced at job eligibility, not at the data level.
+
 **Promotion** is a manual player action and is straightforward to perform.
 **Demotion** is a manual player action and carries a one-time decaying mood modifier.
 
@@ -245,7 +247,7 @@ Three tiers: **Serf / Freeman / Gentry.** All tiers share the same underlying ru
 
 Five core attributes that increase slowly through use:
 
-- **Strength** — physical labor, hauling, melee combat
+- **Strength** — physical labor, hauling speed, melee combat
 - **Dexterity** — precision crafting, smithing, hunting, tailoring
 - **Intelligence** — knowledge work, construction, brewing, baking, scholarship
 - **Wisdom** — farming, fishing, gathering, medicine, herbalism, priesthood
@@ -340,9 +342,19 @@ School vs. work is a binary assignment on the unit's job priority UI. Choosing s
 
 ---
 
+## Drafting (Direct Unit Control)
+
+The player can draft a unit to take direct control, similar to RimWorld. A drafted unit ignores the job queue and need interrupts — the player issues move commands directly.
+
+Needs still drain normally while drafted. Consequences are emergent: a drafted unit left too long will starve (satiation → 0 → malnourished → death) or collapse from exhaustion (energy → 0 → auto-undraft + forced sleep). The energy collapse is the one exception — the unit auto-undrafts and falls asleep wherever they are, preventing a soft-lock from forgotten drafts.
+
+A drafted unit starving to death while guarding a chokepoint in the forest is a valid story beat.
+
+---
+
 ## Needs System
 
-Three needs: **hunger, sleep, recreation.** Values range 0–100, draining over time. Refilled by self-assigned behavior (eating at home, sleeping at home, visiting the tavern).
+Three needs: **satiation, energy, recreation.** Values range 0–100, draining over time. Refilled by self-assigned behavior (eating at home, sleeping at home, visiting the tavern).
 
 ### Interrupt Levels
 
@@ -401,10 +413,11 @@ Three condition types: **Injury**, **Illness**, **Malnourished**. See CONTEXT.md
 ### Core Model
 
 - **Single global job queue.** All job types (regular work and hauling) share one flat array. Jobs have a `type` field; units scan filtered by eligibility and personal priority settings.
-- **Units poll the queue** when idle, filtered by tier and skill eligibility. Ties broken by distance.
+- **Units poll the queue** when idle, filtered by tier and skill eligibility. Ties broken by a weighted combination of distance and job age — ensures old jobs at the far edge of the map eventually get claimed instead of being perpetually deprioritized.
 - **Needs bypass the queue.** Need interrupts trigger self-assigned behavior.
 - **Job output quality** scales with attribute (T1) or attribute + skill (T2/T3).
 - **Progress persists on abandonment.**
+- **Drafted units skip job polling entirely.**
 
 ### Priority System
 
@@ -421,7 +434,7 @@ Gathering and production buildings have a `max_workers` from config and a player
 
 ### Resource Claiming
 
-When a worker targets a map resource (tree, herb), the tile is claimed via `tile.claimed_by = unit_id`. Other workers skip claimed tiles when searching. Claim is cleared on completion, abandonment, or unit death.
+When a worker targets a map resource (tree, herb, berry bush), the tile is claimed via `tile.claimed_by = unit_id`, and the unit stores `unit.claimed_tile = tileIndex`. Other workers skip claimed tiles when searching. Claim is cleared on completion, abandonment, or unit death. The `claimed_tile` reference on the unit enables O(1) cleanup.
 
 ---
 
@@ -443,10 +456,10 @@ Three patterns, all sharing the same inventory model:
 
 Production buildings have separate input and output inventories. The worker cycle:
 
-1. Check if output storage exceeds threshold → carry output to nearest stockpile
-2. Check if work-in-progress exists → resume crafting
-3. If no WIP, check if input has materials → start new craft (consume from input, create WIP)
-4. If no materials in input → search queue for unclaimed pull job matching this building and resource; if found, claim it and fetch from source; if not found, self-fetch from nearest stockpile
+1. **Check output overflow** — if output storage exceeds threshold, carry output to nearest stockpile
+2. **Resume work-in-progress** — if WIP exists, continue crafting
+3. **Start new craft** — if no WIP and input has materials, consume from input and create WIP
+4. **Fetch materials** — if no materials in input, search the job queue for an unclaimed pull job targeting this building and resource; if found, claim it and fetch from source stockpile; if not found, self-fetch from nearest stockpile
 
 ### Work-in-Progress
 
@@ -454,7 +467,7 @@ Materials are consumed from input when crafting begins. The WIP persists on the 
 
 ### Carrying and Offloading
 
-Units carry one resource type at a time. Carrying is part of the worker's primary job cycle (a woodcutter carrying logs to camp, a smith carrying iron from a stockpile), distinct from dedicated hauling jobs.
+Units carry one resource type at a time (`CARRY_CAPACITY = 10` units per trip, fixed for all units). Carrying is part of the worker's primary job cycle (a woodcutter carrying logs to camp, a smith carrying iron from a stockpile), distinct from dedicated hauling jobs.
 
 **Offloading** occurs when a worker carrying resources is reassigned to a different job type. They deposit to the nearest stockpile before starting the new job. If no stockpile has capacity, resources are lost and the player is notified. If a worker returns to the same job type after an interrupt and is still carrying resources, they resume at the delivery phase of their cycle.
 
@@ -464,15 +477,15 @@ Units carry one resource type at a time. Carrying is part of the worker's primar
 
 ### Slot-Based Inventory
 
-Stockpiles and building inventories use a shared slot model. Each slot holds a single resource type with a capacity determined by `slot_capacity / resource_slot_size`. When depositing, fill an existing slot of that resource type first. If full, use an empty slot. If no empty slots or filter limit reached, reject.
+Stockpiles/warehouses and building inventories use a shared slot model. Each slot holds a single resource type with a capacity determined by `slot_capacity / resource_slot_size`. When depositing, fill an existing slot of that resource type first. If full, use an empty slot. If no empty slots or filter limit reached, reject.
 
 ### Stockpiles
 
-Player-placed, player-defined dimensions. Slot count equals tile footprint (width × height). Slot capacity is `SLOT_CAPACITY` (20). Player-configurable filters with per-resource slot limits (default: accept all, max slots = total slot count).
+A building type (`is_player_sized = true`). Player-placed, player-defined dimensions. Slot count equals tile footprint (width × height). `slot_capacity` = 20 (from BuildingConfig). Player-configurable filters with per-resource slot limits (default: accept all, max slots = total slot count). Free to build (no construction cost).
 
 ### Warehouses
 
-Fixed size (4×4), 16 slots at `WAREHOUSE_SLOT_CAPACITY` (60) per slot. Player-configurable filters, same as stockpiles.
+A building type. Fixed size (4×4), 16 slots at `slot_capacity` = 60 per slot (from BuildingConfig). Player-configurable filters, same as stockpiles. Requires construction.
 
 ### Building Inventories
 
@@ -484,7 +497,7 @@ Simple named fields with per-type capacity limits. Not part of the slot system.
 
 ### Global Resource Display
 
-The UI shows a total per resource type, computed by summing all stockpile slots, building inventory slots, household stores, and unit carrying amounts. Recomputed on demand, not stored state.
+The UI shows a total per resource type, computed by summing all stockpile/warehouse slots, building inventory slots, household stores, and unit carrying amounts. Recomputed on demand, not stored state.
 
 ---
 
@@ -494,16 +507,22 @@ The UI shows a total per resource type, computed by summing all stockpile slots,
 
 | Term | Meaning |
 |---|---|
-| **Hauler** | Dedicated T1 job. Claims hauling jobs from the queue. |
-| **Hauling system** | Scans building outputs/inputs and stockpiles. Posts hauling jobs based on player-configured rules. |
+| **Hauler** | Dedicated T1 job. Claims hauling jobs from the queue. Strength affects hauling speed. |
+| **Hauling system** | Scans buildings with hauling rules. Posts hauling jobs based on push/pull thresholds. |
 | **Hauling job** | A job in the global queue to move one trip of resources between two locations. |
-| **Hauling rule** | Player-configured push/pull threshold on a stockpile or building. |
+| **Hauling rule** | Player-configurable push/pull threshold on a building. Defaults provided per building type. |
 | **Carrying** | Worker transporting resources as part of their primary job cycle. Not a hauling job. |
 | **Offloading** | Depositing carried resources when switching job types. |
 
 ### Resource Flow
 
-All resource redistribution flows through stockpiles as intermediaries. No direct building-to-building hauling. A production chain like mill → bakery goes: mill output → stockpile → bakery input.
+All resource redistribution flows through stockpile/warehouse buildings as intermediaries. No direct building-to-building hauling. A production chain like mill → bakery goes: mill output → stockpile → bakery input.
+
+### Hauling Rules
+
+Rules live on each building as a `hauling_rules` table. BuildingConfig defines sensible defaults per building type (e.g., a smithy auto-pulls iron and auto-pushes tools/weapons/armor). Player can override defaults at runtime.
+
+A rule specifies the direction (push/pull), resource, and threshold — nothing else. The hauling system resolves the counterpart (nearest stockpile with capacity for push, nearest stockpile with stock for pull) at job-posting time.
 
 ### Job Posting
 
@@ -511,7 +530,7 @@ The hauling system scans periodically and posts jobs based on deficit:
 - **Push:** building output exceeds threshold → post jobs to move resources to a stockpile
 - **Pull:** building input is below threshold → post jobs to move resources from a stockpile
 
-Job count is deficit-based: enough jobs are posted to cover the deficit minus estimated resources already in transit. Each job represents one trip and doesn't specify an amount — the hauler picks up as much as they can carry.
+Job count is deficit-based: enough jobs are posted to cover the deficit minus estimated resources already in transit. Each job represents one trip. The hauler picks up `CARRY_CAPACITY` (10) units per trip. Carry capacity is fixed for all units — this keeps deficit calculations exact.
 
 ### Validation
 
@@ -519,7 +538,7 @@ Haulers validate conditions when claiming a job (source still has resources, des
 
 ### Worker Interaction
 
-Production workers at step 4 of their cycle can claim unclaimed pull jobs targeting their building. This counts toward active jobs in the deficit calculation and prevents duplicate hauler trips.
+Production workers during the fetch-materials phase of their cycle can claim unclaimed pull jobs targeting their building. This counts toward active jobs in the deficit calculation and prevents duplicate hauler trips.
 
 ---
 
@@ -541,7 +560,7 @@ Units without a home assignment eat from a communal stockpile directly. Mood pen
 
 ### Consumer Goods
 
-- **Food** — bread, vegetables, meat, fish. Variety (distinct types in household) drives mood.
+- **Food** — bread, berries, meat, fish. Variety (distinct types in household) drives mood.
 - **Clothing** — tier-appropriate. Missing or wrong-tier = mood penalty.
 - **Beer** — consumed at the Tavern, not at home.
 - **Jewelry** — Gentry luxury good. Absence = Gentry mood penalty.
@@ -555,11 +574,11 @@ Units without a home assignment eat from a communal stockpile directly. Mood pen
 | Chain | Steps |
 |---|---|
 | Bread | Wheat Farm (Farmer, T1) → wheat → Mill (Miller, T1) → flour → Bakery (Baker, T2) → bread |
-| Vegetables | Gatherer's Hut (Gatherer, T1) → vegetables |
+| Berries | Gatherer's Hut (Gatherer, T1) → berries |
 | Meat | Hunting Cabin (Huntsman, T2) → meat |
 | Fish | Fishing Dock (Fisher, T1) → fish |
 
-Bread is most efficient at scale but requires three buildings and a Freeman baker. Vegetables and fish are simple but bottlenecked by natural supply. Meat requires a Freeman huntsman. Food variety drives household mood.
+Bread is most efficient at scale but requires three buildings and a Freeman baker. Berries and fish are simple but bottlenecked by natural supply. Meat requires a Freeman huntsman. Food variety drives household mood.
 
 ### Alcohol
 
@@ -631,7 +650,7 @@ Interior positions (beds) defined in building config, created on construction co
 | Woodcutter's Camp | Woodcutter (T1) | Logs | Pathable ground |
 | Mine | Miner (T1) | Iron, rare gold/silver/gems | One edge on rock |
 | Quarry | Stonecutter (T1) | Stone | Pathable ground |
-| Gatherer's Hut | Gatherer (T1) | Vegetables | Pathable ground |
+| Gatherer's Hut | Gatherer (T1) | Berries | Pathable ground |
 | Hunting Cabin | Huntsman (T2) | Meat | Pathable ground |
 | Fishing Dock | Fisher (T1) | Fish | One edge on water |
 
@@ -676,8 +695,10 @@ Units visit the Tavern to fulfill recreation need. Without a barkeep, units soci
 
 | Building | Notes |
 |---|---|
-| Stockpile | Free, outdoor, player-defined dimensions, slot count = footprint tiles |
-| Warehouse | Built, 4×4, 16 slots at higher capacity |
+| Stockpile | Free, outdoor, player-defined dimensions, slot count = footprint tiles, slot_capacity = 20 |
+| Warehouse | Built, 4×4, 16 slots, slot_capacity = 60 |
+
+Both are building types in BuildingConfig. Stockpiles are the only building with player-defined dimensions.
 
 ### Military
 
@@ -711,7 +732,7 @@ Current notification types:
 
 - **Map and world generation** — seed, parameters, biomes, starting layout and loadout
 - **UI/UX architecture** — interface design, information hierarchy, management tools
-- **Dynasty/succession implementation** — traversal, regency mechanics
+- **Dynasty/succession implementation** — traversal mechanics
 - **Event system** — Changeling, Fey encounters, random occurrences
 - **Event speed controls** — configurable auto-pause/slowdown per event type
 - **Combat** — mechanics, military behavior, threat types
