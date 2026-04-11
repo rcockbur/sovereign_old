@@ -32,10 +32,6 @@ end
 --- Advance the tick counter by one.
 function time:advance()
     self.tick = self.tick + 1
-end
-
---- Derive all calendar fields from the current tick. Called at the start of each tick.
-function time:updateClock()
     self.game_minute = math.floor(self.tick % TICKS_PER_HOUR  / TICKS_PER_MINUTE)
     self.game_hour   = math.floor(self.tick % TICKS_PER_DAY   / TICKS_PER_HOUR)
     self.game_day    = math.floor(self.tick % TICKS_PER_SEASON / TICKS_PER_DAY) + 1

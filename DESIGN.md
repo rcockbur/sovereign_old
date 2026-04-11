@@ -1,15 +1,17 @@
 # Sovereign — Design Document
-*Working title. Version 0.9*
-
----
+*v1*
 
 ## Project Overview
 
 **Stack:** Love2D · Lua · VS Code · PC (Windows primary)
 
-**Concept:** A medieval village survival and management sim in the vein of Banished, RimWorld, and Dwarf Fortress. The player oversees a small settlement from its earliest days, guiding it through generations of growth, hardship, and discovery.
+**Concept:** A medieval village survival and management sim in the vein of Banished, RimWorld, and Dwarf Fortress. The player oversees a small settlement from its earliest days, guiding it through generations of growth, hardship, and discovery. Single-player only. Not a roguelike, not an RTS — combat exists but is not the focus. Not trying to match DF's simulation depth or content breadth.
 
----
+## Setting
+
+Sovereign is set in medieval Western Europe, primarily English and Norman in character. The most emblematic period is roughly 1250–1350, when plate armor is beginning to emerge and the classic image of the medieval knight is taking shape. A broad blending of the 800–1400 period is acceptable — the goal is a setting that feels familiar and legible to modern audiences rather than one that is historically precise.
+
+Terminology should remain internally consistent. Viking, Renaissance, and Dark Ages terminology should be avoided. Words like baron, serf, and knight are appropriate. Gunpowder, guilds as formal institutions, and perspective art are out of period.
 
 ## Design Pillars
 
@@ -17,7 +19,7 @@
 At any point in the game, the player should be aware of a handful of specific individuals and following their development. Units are never anonymous — they have families, skills, histories, and fates the player comes to care about. Systems should actively surface interesting individuals rather than letting them be lost in the crowd.
 
 **The dynasty is the through-line.**
-The player's leader and their family are the main characters of every playthrough. The leader begins as a knight — a Gentry unit with a military background — and may rise to become a baron as the settlement grows. When the leader dies, succession rules determine who inherits. The leader's family, their heirs, and the crises that threaten the dynasty give each playthrough its narrative shape.
+The player's leader and their family are the main characters of every playthrough. The leader begins as a Gentry unit and may rise to become a baron as the settlement grows. When the leader dies, succession rules determine who inherits. The leader's family, their heirs, and the crises that threaten the dynasty give each playthrough its narrative shape.
 
 **Losing is fun.**
 The goal is to build a large, stable village, and this is achievable — but random events, cascading failures, and chaotic emergent situations mean that losing is always possible. Failure should feel dramatic and earned rather than arbitrary.
@@ -28,8 +30,6 @@ The wilderness at the map's edge is a source of mystery, danger, and reward. Pla
 **Streamlined depth.**
 DF depth without DF bloat. Systems should be rich enough to generate interesting situations but legible enough that the player always understands what is happening and why.
 
----
-
 ## Design Goals
 
 - Readable, intuitive UI — a direct response to DF's weaknesses
@@ -39,705 +39,281 @@ DF depth without DF bloat. Systems should be rich enough to generate interesting
 - Multi-generational play within a single playthrough
 - Late-game magic systems emerging naturally from existing unit progression
 
-## What This Is Not
+## Development Phases
 
-- Not trying to match DF's simulation depth or content breadth
-- Not a roguelike
-- Not multiplayer
-- Not an RTS — combat exists but is not the focus
+Development is organized into six phases. Each phase produces a qualitatively different version of the game. Pending design items are listed under each phase — when all items are resolved, the pending list disappears.
 
----
+**Phase 1 — Survival.** The core simulation runs. Six serfs exist on a generated map, move via pathfinding, and have needs that drain over time. The player designates map resources for collection and places buildings to organize labor. Serfs gather berries and fish to survive, haul resources to stockpiles, chop wood, and sleep in instantly-placed housing. The game has a basic UI for placing buildings, inspecting units, and controlling time. Save/load works. If food runs out, units starve and die. No leader, no dynasty, no classes beyond serf — those arrive in later phases. This phase proves the simulation engine — time, movement, needs, activities, hauling, and death all function together.
+
+*Pending:*
+- Building tile map system and Phase 1 building layouts — authoring tile maps, layout positions, and final dimensions for Phase 1 buildings (stockpile, cottage, woodcutter's camp, gatherer's hut, fishing dock); remaining buildings authored as they come online in later phases
+
+**Phase 2 — Economy.** The full production economy is online. Proper construction replaces instant-build. Freemen with specialties work at processing buildings, transforming raw resources through production chains (wheat → flour → bread). Farms follow the seasonal cycle. The player configures serf priorities, manages building orders, and assigns specialties. A merchant delivers food to homes; units self-fetch their own equipment from storage. Extraction buildings feed the metalworking chain. The settlement sustains itself through infrastructure rather than foraging.
+
+*Pending:*
+- Frost day ranges — exact thaw_day and frost_day value ranges for tuning
+- Building construction over obstructions — allowing placement on tiles with clearable obstructions (trees, bushes), with units clearing before construction begins
+- Barn details — final name, building size, item capacity, UI panel design
+- Hauling order UI — storage building filtered views, master hauling overview
+
+**Phase 3 — Mood & Health.** The settlement's quality of life matters. Mood reflects housing, food variety, clothing, and tools — giving the player something to optimize beyond survival. Mood thresholds affect productivity and can drive deviancy. Consumer goods degrade and must be resupplied. The tavern fulfills recreation needs. Illness threatens units and requires a working physician. This phase transforms the game from a logistics puzzle into a settlement that feels alive.
+
+*Pending:*
+- Ground drop UI — how to display multiple resource types on the same tile when overlap occurs
+- Herbalist's hut — deferred from Phase 1; herbs have no consumer until physician exists in Phase 3
+- Tavern — recreation fulfillment, beer delivery/consumption, staffed vs unstaffed behavior
+- Apothecary mechanics — herb consumption, patient detection, physician travel logic
+- Trait config — mechanical values for Crippled, Haunted (see BRAINSTORMING.md for Touched, Changeling)
+
+**Phase 4 — Generations.** Time becomes the central mechanic. Units age, marry, have children, and die of old age. Children attend school or work based on class. The dynasty matters — the leader's death triggers succession, and the heir's readiness (or lack thereof) creates drama. Clergy provide spiritual services, gentry consume resources without working. Social relationships form between units. The game delivers on the "individual stories" and "dynasty as through-line" pillars.
+
+*Pending:*
+- Dynasty/succession — traversal mechanics
+- Leadership skill — growth mechanism, effects
+- Immigration — triggers, frequency, unit class
+- Population growth — soft caps, growth curve tuning
+- Home assignment — manual player override (auto-assignment is designed; see TABLES.md)
+- Demotion mechanics — whether and how freemen/gentry can be demoted
+- School mechanics — intelligence growth rate, teacher skill scaling, capacity overflow
+- Marriage formation — eligibility rules, triggers, ceremony, class promotion implications
+- Relationship formation — how friend/enemy relationships form, deepen, and break
+
+**Phase 5 — Dangerous World.** The world beyond the village becomes a threat. Combat mechanics enable military response to bandits, wolves, and forest creatures. Visibility and fog of war make the forest a place of uncertainty. Scouts reveal the map, knights train at the barracks. Drafting pulls units from their jobs, creating economic tension. Injuries from combat require medical treatment. The "losing is fun" pillar expands beyond mismanagement to include external pressure.
+
+*Pending:*
+- Combat mechanics — melee system, unit stats, threat encounters (see BRAINSTORMING.md)
+- Knight specialty — granting knighthood, gentry promotion, training system (see BRAINSTORMING.md)
+- Barracks — function, training mechanics (see BRAINSTORMING.md)
+- Ranged combat, scout job (see BRAINSTORMING.md)
+- Visibility system — vision rules, implementation approach (see BRAINSTORMING.md)
+- Movement speed formula — trait effects on speed
+
+**Phase 6 — The Strange.** The game's supernatural layer emerges. Fey creatures inhabit the deep forest with their own alien logic — some can be bargained with, others must be fought. Christian supernatural forces introduce ghosts, demons, and possessed units. The scholar unlocks arcane magic through research, the bishop receives divine power through the Vision. The game world deepens from a grounded medieval settlement into something stranger and more mythic. See BRAINSTORMING.md for creature lists, encounter concepts, and magic system ideas.
+
+*Pending:*
+- Fey mechanics — encounter design, diplomacy, late-game escalation (see BRAINSTORMING.md)
+- Magic — arcane tech tree, divine scripture, spell lists, mana rates (see BRAINSTORMING.md)
+- Witch gender setting — mechanical effect (depends on arcane magic system)
+- Cathedral, Library, and Christmas Mass — late-game service buildings and events (see BRAINSTORMING.md)
+
+**Unphased.** Ideas and systems that don't belong to a specific phase yet.
+
+- Hauling order priority — per-order priority for scarce hauler situations
+- Town hall — function, governance mechanics
+- Luxury goods beyond jewelry
+- Animal husbandry (see BRAINSTORMING.md)
+- External trade (see BRAINSTORMING.md)
+- Event speed controls (see BRAINSTORMING.md)
+- Apprenticeship system (see BRAINSTORMING.md)
+- Gentry activities (see BRAINSTORMING.md)
 
 ## Time
 
-### Calendar
+The seasonal cadence supports recurring events: church on Sundays, market days, festivals. The smallest player-facing time unit is the game_hour. See UI.md for time display format.
 
-- 1 game_year = 4 game_seasons (Spring, Summer, Autumn, Winter)
-- 1 game_season = 7 game_days (Sunday through Saturday)
-- 1 game_day = 24 game_hours
-- 1 game_hour = 60 game_minutes
+The player controls game pacing with multiple speed settings. The player can configure automatic pausing and slowdown for important events.
 
-Game_minutes are an internal config unit, not shown to the player. The smallest player-facing time unit is the game_hour.
+The game begins on a spring morning with a small group of units. No buildings, no resources. Pure survival start. Surviving the first winter is an intended milestone; subsequent winters become progressively less threatening as new pressure sources take over.
 
-### Player Display
+See CLAUDE.md for time constants and game start conditions.
 
-The player sees datetime in the format: **Year 4 - Spring - Tuesday - 3:00 PM**
+FROST AND GROWING SEASONS
 
-The weekly cadence supports recurring events: church on Sundays, market days, festivals.
+Seasons are calendar labels. Frost is weather. The growing season varies year to year — some years are generous, others punishingly short. The player receives advance warning of both thaw and frost. See ECONOMY.md for frost/thaw mechanics.
 
-### Day/Night Cycle
+A warm year gives extra time for long-maturing crops. A cold year compresses the window — late thaws delay planting, early frosts threaten unharvested fields. Experienced players plan crop selection around risk tolerance. New players get burned once and adapt.
 
-Daytime runs from 6am to 6pm. Nighttime from 6pm to 6am. Units are awake from 6am to 10pm (16 waking hours) and sleep from 10pm to 6am (8 sleeping hours). The day/night cycle is functional — it structures the unit's daily routine, not just a visual effect.
+This creates distinct seasonal personalities. Spring is planning time — the thaw arrives, the player decides which farms to plant and which crops to risk. Summer is the constructive season — crops grow without farmer input, freeing labor for building and hauling. Autumn is the busiest season — harvest is time-sensitive, and an approaching frost creates real urgency. Winter is quiet — no farming, and (eventually) additional challenges from cold.
 
-### Pacing
-
-One game_day = 10 real minutes at Normal speed (25 real seconds per game_hour).
-
-| Speed | Multiplier | Real minutes per game_day | Real minutes per game_year |
-|---|---|---|---|
-| Normal | x1 | 10 | 280 (~4.7 hrs) |
-| Fast | x2 | 5 | 140 (~2.3 hrs) |
-| Very Fast | x4 | 2.5 | 70 (~1.2 hrs) |
-| Ultra | x8 | 1.25 | 35 min |
-
-### Starting Conditions
-
-The game begins at **6:00 AM, Sunday, Spring, Year 1**.
-
-**Starting loadout:** 6 Serfs and 1 Knight (the leader, a Gentry unit). No buildings, no resources. Pure survival start.
-
-### Event Speed Controls
-
-The player can configure auto-pause or auto-slowdown for specific event types (e.g., unit death, succession, Fey encounter, illness outbreak, unit trapped).
-
-*Event type list and configuration UI are pending.*
-
-### Simulation Tick
-
-The simulation runs at 60 ticks per real second at Normal speed, scaling with the speed multiplier. Entity updates are distributed across ticks using hash offsets — each entity updates once per real second at Normal speed. See CONTEXT.md for tick system details.
-
-### Seasonal Milestones
-
-Surviving the first winter is an intended milestone. Subsequent winters become progressively less threatening as the settlement matures, with new pressure sources taking over as the primary drivers of drama.
-
----
+See ECONOMY.md for frost/thaw mechanics.
 
 ## Aging
 
-Units age 1 life-year per game_season (4 life-years per calendar game_year). A unit born on Day 3 of Spring ages up when Day 3 of Summer arrives, then again on Day 3 of Autumn, and so on — each unit ages on their own birth-season anniversary, not all at once.
+Units age faster than real time — generations pass in a few real hours of play rather than dozens.
 
-Adulthood is reached at age 16 (4 calendar game_years / 16 game_seasons from birth). Average lifespan is approximately 60 life-years (~15 calendar game_years).
-
-A generation — the time between a leader taking power and their heir succeeding them — is roughly 8–10 calendar game_years. At Fast speed (x2), this translates to roughly 9–12 real hours of play, spread across multiple sessions.
-
----
+See CLAUDE.md for aging constants and TABLES.md for death_age.
 
 ## The Dynasty
 
-The player's leader is always a specific, named Gentry unit — the most important individual in the settlement and the primary vehicle for player attachment.
-
-### The Leader
-
-The game begins with the leader as a knight (a Gentry unit with military skills) accompanied by a small founding group including a spouse and children. Starting with an established family ensures the player has individuals to care about from the first moments of play.
-
-As the settlement grows, the leader may take on the title of baron. This is primarily thematic — it reflects the settlement's growth and the leader's status.
-
-### Succession
-
-When the leader dies, succession proceeds as follows:
-
-1. **Primogeniture.** The eldest child inherits. Gender does not affect succession.
-2. **Child leader.** If the heir is a child (under 16), they inherit immediately. A child leader can't perform T3 jobs until they come of age, and they have child need profiles — but they are the leader. This creates dramatic moments (a 12-year-old baron struggling to hold things together).
-3. **No family heir.** If no family heir exists, an existing Gentry unit inherits the leadership role.
+When the leader dies, succession follows family bloodlines — but an unprepared heir inherits all the same, creating dramatic moments.
 
 *Detailed succession traversal mechanics are pending.*
 
----
+## Game Settings
+
+Configurable at new game creation: combat eligibility, clergy eligibility, and succession priority. Historical defaults apply unless changed. These settings have real mechanical implications — restricting clergy to one gender limits the pool of valid Priest and Bishop candidates.
+
+See TABLES.md for world.settings structure.
 
 ## Map
 
-Top-down 2D grid of tiles, procedurally generated from a seed. 400x200 tiles, 1-indexed. Single zone — no separate maps or regions.
+Left half is the settlement area, right half is the forest with increasing danger. Procedurally generated from a seed. Single zone — no separate maps or regions.
 
-### Layout
+The visibility system is **deferred** — all tiles start explored and visible until forest gameplay is implemented.
 
-The left half (columns 1–200) is the settlement area with `forest_depth` 0.0. The right half (columns 201–400) is the forest, with `forest_depth` increasing linearly from 0.0 at column 201 to 1.0 at column 400. `forest_danger` is derived on demand as `depth²`.
+The map is procedurally generated from a single seed. The settlement half is mostly open grass with scattered tree clusters, a few rock outcrops, and one or two lakes — terrain that cooperates with the player. The forest half is dense with natural clearings, more and larger rock formations, and berry bushes growing in gaps between trees. A transition band at the boundary blends the two halves so the forest edge feels gradual rather than a hard line. The starting area near the center of the settlement half is guaranteed to have a clear grass patch for initial building placement.
 
-### Terrain
-
-Four terrain types: grass, dirt, rock, water. Grass and dirt are functionally equivalent — both are pathable. Rock is impassable. Water is impassable. Lakes are present; no rivers or flowing water. No elevation.
-
-### Fog of War
-
-The forest (and potentially parts of the settlement) begins unexplored. A two-layer visibility system reveals the map as units explore:
-
-- **Explored:** permanent flag, flipped when a unit first sees a tile. Unexplored tiles render as black.
-- **Visible:** real-time count of how many units can currently see a tile. Used for reveal events (enemy spotted, ruins discovered) and potentially for showing/hiding enemy unit activity.
-
-Visibility is computed via recursive shadowcasting from each unit's position. Vision is blocked by dense tree clusters (trees at stage 2+ with at least one tree neighbor), buildings, and rock. Standalone trees do not block vision. Herbs and berry bushes never block vision. The first blocking tile in a line of sight is visible; shadow falls behind it.
-
-*Map size, generation parameters, biome details, and starting layout are pending.*
-
----
+See WORLD.md for map dimensions, terrain, forest coverage, visibility, and the generation pipeline.
 
 ## The Forest
 
 The wilderness surrounding the settlement is not simply a resource zone — it is a place with its own character, rules, and inhabitants. It is the primary source of late-game mystery and opt-in escalation.
 
-### Structure
-
-The forest exists on the same map as the settlement, not as a separate zone. Forest depth increases linearly from 0.0 at the settlement-forest boundary to 1.0 at the far right edge. Danger scales quadratically (depth²).
-
-### Trees
-
-Trees are dense in the forest — 70–85% coverage at map gen, with natural clearings distributed uniformly at all depths. The settlement area has sparse small clusters (3–8 trees).
-
-Trees block pathfinding (at stage 2+) and can be chopped down. The forest is a wall the player carves into. Deeper exploration requires logging effort, and the player's path network is player-authored through tree removal.
-
-### Plants
-
-Three plant types exist as tile data: trees, herbs, and berry bushes. All share growth stages (seedling → young → mature) and spreading mechanics.
-
-- **Trees** block pathing at stage 2+. Chopping destroys them permanently — new trees come only from mature tree spreading. Primary source of logs.
-- **Herbs** never block pathing. Gathering resets them to seedling (regrowth). Gated by forest depth — not found in the settlement area. Used for medicine.
-- **Berry bushes** never block pathing. Gathering resets them to seedling (regrowth). Found everywhere including the settlement area. Primary food source for gatherers.
-
-Growth safety rules prevent seedlings from spreading adjacent to buildings. Units can get trapped by converging tree growth — this is accepted as emergent gameplay ("losing is fun"), and the player is notified when it happens.
-
-### Resources
+The forest is dense and resource-rich — a wall the player carves into.
 
 Forest resources are tiered by depth. Basic materials are available everywhere, rarer materials require venturing deeper. Some late-game systems, including magic, are gated behind deep resources.
 
-### Inhabitants
+The forest is home to animals, hostile human factions, ruins, and Fey. The game begins feeling entirely grounded — supernatural elements escalate gradually. See BRAINSTORMING.md for creature lists and encounter concepts.
 
-The forest is home to animals, hostile human factions, ruins of unknown origin, and Fey. Deer are wandering creatures that exist on the map and replenish over time.
+See WORLD.md for forest coverage, plant types, growth/spread mechanics, and movement costs.
 
-**The Fey** are the forest's defining presence. They are not straightforwardly evil — they are ancient, strange, and operating by their own logic. A unit with high Charisma sent as an envoy may achieve outcomes that warriors cannot.
+## Supernatural & Magic
 
-*Fey faction structure, specific encounter types, and the full range of bargaining outcomes are undecided. Deer mechanics are deferred.*
+The game begins fully grounded. Supernatural elements escalate gradually as the player explores the forest and advances the settlement.
 
-### The Changeling Event
+**Fey** — ancient, inhuman beings tied to the forest. Not evil — they operate by alien logic. Diplomatic solutions exist for many encounters. Deeper forest = stronger presence.
 
-A rare, high-stakes event in which the Fey demand a child from the settlement. The player must decide whether to comply. If given, the child returns after a generation, changed unpredictably.
+**Christian Supernatural** — binary holy or corrupt forces. The player's cleric is the primary countermeasure. Includes ghosts, possessed units, cursed ground, and demons.
 
-*Specific mechanical outcomes for the returned changeling are undecided.*
+**Generic Monsters** — combat encounters for forest exploration variety. No faction, no diplomacy.
 
----
+**Bandits** — human raiders. The player's introduction to external threats.
 
-## Magic
+**Wildlife** — wolves appear anywhere; dire wolves are forest-only. Keeps the early game grounded.
 
-Magic is a late-game system that emerges from existing unit progression rather than being bolted on as a separate mechanic. It is rare, significant, and partially gated behind deep forest resources.
+Magic is a late-game system that emerges from existing unit progression. Rare, significant, and partially gated behind deep forest resources. The game begins with no indication that magic exists.
 
-### Divine Magic
+**Divine magic** is reactive and protective. Safe and predictable. **Arcane magic** is active and transformative. More powerful but carries risk. **Dark magic** is wielded only by enemies. Shorthand: **divine magic fixes, arcane magic does.**
 
-Priests/Bishops who reach high levels of Wisdom and priesthood skill may begin to develop the ability to perform miracles.
+**Arcane progression:** Scholar researches through a directed tech tree. Alchemy is the gateway — unlocking it reveals the arcane mana bar and grants the Magician trait.
 
-### Arcane Magic
+**Divine progression:** Priest/Bishop levels priesthood skill. Divine magic unlocks through the Vision — a dramatic narrative event at a Bishop skill threshold. All divine spells unlock simultaneously. The Bishop gains the Blessed trait.
 
-Scholars of sufficient Intelligence who pursue forbidden knowledge may learn to cast spells. Arcane magic is more explicitly tied to forest resources.
+*Specific spells, mana rates, tech tree, and scripture mechanics deferred to BRAINSTORMING.md.*
 
-### Divine vs. Arcane Tension
+See TABLES.md for magic data structure.
 
-The two magic types are not simply parallel tracks. A settlement with both a powerful priest and a practicing scholar may experience internal conflict. This is a feature, not a problem to be solved.
+## Classes and Social Structure
 
-*Specific spells, miracle types, and the mechanical scope of magic are undecided.*
+The settlement is organized into four classes, inspired by the medieval Three Estates but with a distinct serf/freeman split to reflect the game's labor mechanics:
 
----
+**Serfs** are unskilled laborers — the majority of the population. They choose work from a player-configured priority list.
 
-## Units
+**Freemen** are skilled tradespeople. Each freeman is given a **specialty** — a career such as baker, smith, or physician. The player appoints specialists; they find their own work. See BEHAVIOR.md for dynamic work-finding mechanics.
 
-Every unit is simulated individually at all times. In the late game, player attention naturally shifts toward Gentry and Freemen — Serfs can be managed in aggregate through group tooling, though individual control is always available.
+**Clergy** exist outside the economic hierarchy. Appointment is permanent and irrevocable — a weighty decision with lasting consequences. See BEHAVIOR.md for promotion rules.
 
-### Tiers
+**Gentry** are the ruling class. They do not work. Their purpose is to provide the dynasty's leader and, eventually, knights. The player trades economic efficiency for political stability and military readiness.
 
-Three tiers: **Serf / Freeman / Gentry.** All tiers share the same underlying rules — differences are data-driven via config tables:
+Higher classes are needier, making gentry and bishops expensive to maintain. This creates a real cost to elevation — every knight or bishop is a drain on the settlement's resources.
 
-| Property | Effect |
-|---|---|
-| Needs profile | Higher tiers drain faster and have higher mood/interrupt thresholds |
-| Skills | Serfs cannot learn skills. Freeman and Gentry can. |
-| Job eligibility | T1 for any unit. T2 requires Freeman+. T3 requires Gentry. |
-| Mood penalties | Higher tiers are unhappy performing work below their tier |
+ATTRIBUTES
 
-All skill keys are present on every unit at 0 regardless of tier. The tier gate is enforced at job eligibility, not at the data level.
+Three attributes: **Strength, Intelligence, Charisma.** Attributes are partly inherited and partly developed over a unit's life. Schooling is a meaningful investment — educated freeman children become better craftspeople over generations. See TABLES.md for attribute data structures and growth mechanics.
 
-**Promotion** is a manual player action and is straightforward to perform.
-**Demotion** is a manual player action and carries a one-time decaying mood modifier.
+See BEHAVIOR.md for class system, promotion rules, and children behavior. See TABLES.md for JobTypeConfig and NeedsConfig.
 
-### Attributes
+## Traits
 
-Five core attributes that increase slowly through use:
+Traits are permanent tags representing significant thresholds or events. Rare — most units have none. All traits have mechanical effects.
 
-- **Strength** — physical labor, hauling speed, melee combat
-- **Dexterity** — precision crafting, smithing, hunting, tailoring
-- **Intelligence** — knowledge work, construction, brewing, baking, scholarship
-- **Wisdom** — farming, fishing, gathering, medicine, herbalism, priesthood
-- **Charisma** — trading, leadership, barkeeping
+| Trait | Type | Effect |
+|---|---|---|
+| Blessed (name TBD) | Acquired | Received the Vision. Unlocks divine magic. |
+| Magician | Acquired | Unlocked arcane magic through Alchemy. Can cast arcane spells. |
+| Haunted | Acquired | Persistent mood penalty. Worsens near supernatural events. |
+| Crippled | Acquired | Permanent movement or productivity penalty. |
+| Marked | Genetic | The Fey take interest. Affects Fey encounter outcomes. |
+| Touched | Acquired | Result of direct Fey contact. Ambiguous effect. |
 
-All units grow attributes through work, including Serfs and children.
+*TraitConfig with mechanical values is pending. Blessed/Magician depend on magic system; Marked/Touched depend on Fey system.*
 
-### Skills
+## Needs, Mood, and Health
 
-- Leveled by use (numeric proficiency, default 0)
-- Skill caps are per-job, not per-unit
-- Serfs cannot learn skills (effective cap of 0)
-- Freeman and Gentry grow skills through T2/T3 work
-- Every skill key present on every unit, default 0
+**Needs:** Three needs (satiation, energy, recreation) that create pressure to stop working and attend to personal survival. All units consume food at the same rate. Spirituality is not a need — it is handled by the scheduled Sunday church service.
 
-**15 skills:** melee_combat, smithing, hunting, tailoring, baking, brewing, construction, scholarship, herbalism, medicine, priesthood, barkeeping, trading, jewelry, leadership
+**Sleep:** Units need sleep. They tend to be awake during the day and asleep at night, recovering energy while they rest. Sleep deprivation is visible and punishing. See BEHAVIOR.md Sleep for the full behavior.
 
-### Job Tiers
+**Mood:** A composite score reflecting the unit's overall wellbeing. Driven by housing, food variety, clothing, luxury goods, health, social events, and life events. High mood boosts productivity; low mood causes productivity penalties and eventually deviancy (abandoning work, antisocial behavior).
 
-- **T1 (Unskilled):** Any unit. Attribute only. Intended for Serfs. Higher tiers get mood penalties.
-- **T2 (Skilled):** Freeman+ only. Attribute + skill. Gentry get mood penalties.
-- **T3 (Skilled, Elite):** Gentry only. Attribute + skill. Highest specialization.
+**Health:** Driven by injury, illness, and malnourishment. Unit dies at 0.
 
-T2/T3 career ladders sharing the same skill: Guard→Knight (melee_combat), Smith→Armorer (smithing), Builder→Architect (construction), Teacher→Scholar (scholarship), Healer→Physician (medicine), Priest→Bishop (priesthood), Merchant→Steward (trading).
+Units wear tools, clothing, and jewelry that degrade over time, creating ongoing demand for production. See BEHAVIOR.md for equipment want behavior and TABLES.md for durability values.
 
-### Full Job Table
-
-**T1 — Unskilled (any unit, attribute only):**
-
-| Job | Attribute |
-|---|---|
-| Hauler | Strength |
-| Woodcutter | Strength |
-| Miner | Strength |
-| Stonecutter | Strength |
-| Miller | Strength |
-| Farmer | Wisdom |
-| Fisher | Wisdom |
-| Gatherer | Wisdom |
-
-**T2 — Skilled (Freeman+, attribute + skill):**
-
-| Job | Attribute | Skill | Max Skill |
-|---|---|---|---|
-| Guard | Strength | melee_combat | 5 |
-| Smith | Dexterity | smithing | 5 |
-| Huntsman | Dexterity | hunting | 5 |
-| Tailor | Dexterity | tailoring | 5 |
-| Baker | Intelligence | baking | 5 |
-| Brewer | Intelligence | brewing | 5 |
-| Builder | Intelligence | construction | 5 |
-| Teacher | Intelligence | scholarship | 5 |
-| Herbalist | Wisdom | herbalism | 5 |
-| Healer | Wisdom | medicine | 5 |
-| Priest | Wisdom | priesthood | 5 |
-| Barkeep | Charisma | barkeeping | 5 |
-| Merchant | Charisma | trading | 5 |
-
-**T3 — Elite (Gentry only, attribute + skill):**
-
-| Job | Attribute | Skill | Max Skill |
-|---|---|---|---|
-| Knight | Strength | melee_combat | 10 |
-| Armorer | Dexterity | smithing | 10 |
-| Jeweler | Dexterity | jewelry | 10 |
-| Architect | Intelligence | construction | 10 |
-| Scholar | Intelligence | scholarship | 10 |
-| Physician | Wisdom | medicine | 10 |
-| Bishop | Wisdom | priesthood | 10 |
-| Steward | Charisma | trading | 10 |
-| Leader | Charisma | leadership | 10 |
-
-### Children
-
-Children (under 16) can be assigned to **school** or to limited safe T1 jobs: Hauler, Farmer, Gatherer, Fisher.
-
-Children have a fast-draining recreation need, causing frequent play interrupts that naturally limit productive hours without requiring a special schedule system.
-
-- **School child** — grows Intelligence, Wisdom, Charisma. Enters adulthood with strong mental attributes.
-- **Working child** — grows Strength or Wisdom through labor. Provides immediate economic value.
-- **Idle child** — grows nothing meaningfully.
-
-School vs. work is a binary assignment on the unit's job priority UI. Choosing school greys out all job options.
-
-### Relationships
-
-- **Stored:** `father_id`, `mother_id`, `child_ids`, `spouse_id`, `friend_ids` (up to 3), `enemy_ids` (up to 3)
-- **Derived:** siblings (query parent's children), half-siblings, step-siblings
-- No divorce. Marriage is permanent until death.
-
-*Relationship formation mechanics are undecided.*
-
----
-
-## Drafting (Direct Unit Control)
-
-The player can draft a unit to take direct control, similar to RimWorld. A drafted unit ignores the job queue and need interrupts — the player issues move commands directly.
-
-Needs still drain normally while drafted. Consequences are emergent: a drafted unit left too long will starve (satiation → 0 → malnourished → death) or collapse from exhaustion (energy → 0 → auto-undraft + forced sleep). The energy collapse is the one exception — the unit auto-undrafts and falls asleep wherever they are, preventing a soft-lock from forgotten drafts.
-
-A drafted unit starving to death while guarding a chokepoint in the forest is a valid story beat.
-
----
-
-## Needs System
-
-Three needs: **satiation, energy, recreation.** Values range 0–100, draining over time. Refilled by self-assigned behavior (eating at home, sleeping at home, visiting the tavern).
-
-### Interrupt Levels
-
-Needs trigger interrupts at two thresholds:
-
-- **Soft interrupt:** need drops below `soft_threshold`. Worker finishes current delivery before handling the need. A woodcutter carrying logs completes the trip, deposits, then goes to eat.
-- **Hard interrupt:** need drops below `hard_threshold`. Worker drops everything immediately. A starving unit abandons their current task.
-
-Thresholds are configured per need per tier in NeedsConfig. Needs are never posted as jobs — units self-assign need behavior directly.
-
-Spirituality is not a need — it is handled by the scheduled Sunday church service.
-
----
-
-## Mood System
-
-Mood is **stateless** — recalculated from scratch on each unit's hashed update. Unbounded in both directions.
-
-### Inputs
-
-1. **Stored modifiers** — event-driven, decay over time (e.g. `{ source = "family_death", value = -20, ticks_remaining = 14 * TICKS_PER_DAY }`)
-2. **Calculated modifiers** — derived fresh from current state:
-   - Need contributions (based on current need values and tier thresholds)
-   - Housing quality (building `housing_tier` vs. unit tier)
-   - Food variety (distinct food types stocked in household)
-   - Clothing (tier-appropriate clothing in household)
-   - Luxury goods (jewelry for Gentry)
-   - Job/tier mismatch (debuff for work below tier)
-   - Health (penalty from low health)
-   - Sleeping on floor (no bed assignment)
-   - Sunday service attendance (weekly decaying modifier)
-   - Funeral/wedding attendance (event-driven modifier)
-
-### Thresholds
-
-| Threshold | Value | Effect |
-|-----------|-------|--------|
-| Inspired | 80+ | Productivity bonus |
-| Content | 40–80 | No effect (baseline) |
-| Sad | 20–40 | Slight productivity penalty |
-| Distraught | 0–20 | Productivity penalty + chance for deviancy |
-| Defiant | Below 0 | Won't work, high chance for deviancy |
-
----
-
-## Health System
-
-Health is **stateless** — recalculated on each unit's hashed update as `100 + sum of all health modifier values`. Clamped 0–100. Unit dies at 0.
-
-Three condition types: **Injury**, **Illness**, **Malnourished**. See CONTEXT.md for config tables.
-
----
+See TABLES.md for NeedsConfig, ResourceConfig, MoodThresholdConfig, MoodModifierConfig, InjuryConfig, IllnessConfig.
 
 ## Job System
 
-### Core Model
+All work flows through a single job queue. Buildings post jobs when they have work available. Serfs and freemen both poll the same queue — they differ only in what they're looking for. One system, one queue, one mental model for the player.
 
-- **Single global job queue.** All job types (regular work and hauling) share one flat array. Jobs have a `type` field; units scan filtered by eligibility and personal priority settings.
-- **Units poll the queue** when idle, filtered by tier and skill eligibility. Ties broken by a weighted combination of distance and job age — ensures old jobs at the far edge of the map eventually get claimed instead of being perpetually deprioritized.
-- **Needs bypass the queue.** Need interrupts trigger self-assigned behavior.
-- **Job output quality** scales with attribute (T1) or attribute + skill (T2/T3).
-- **Progress persists on abandonment.**
-- **Drafted units skip job polling entirely.**
+Workers are self-sufficient — they fetch their own inputs from storage and deposit their own outputs to storage as part of their work cycle. Dedicated haulers clear ground piles, deliver construction materials, and execute player-configured storage-to-storage hauling orders.
 
-### Priority System
+See BEHAVIOR.md for activity system, job queue filtering, work cycles, and self-fetch/self-deposit.
 
-| Level | Value | Description |
-|---|---|---|
-| High | 3 | Urgent work |
-| Normal | 2 | Default |
-| Low | 1 | Background tasks |
-| Disabled | 0 | Unit will not pull this job category |
+## Economy
 
-### Worker Limits
+The economy is built around production chains that transform raw resources into consumable goods. The bread chain (farm → mill → bakery) is the backbone of food production. Berries and fish provide simpler alternatives with no processing infrastructure but higher labor cost per unit of food. The player transitions from foraged food to farming as the settlement grows.
 
-Gathering and production buildings have a `max_workers` from config and a player-adjustable `worker_limit` clamped to that max. The player can set `worker_limit` to 0 to effectively shut a building down without deconstructing it.
+Three food types exist: bread, berries, and fish. Food is designed so the player can assess total supply at a glance — conversion ratios are intuitive and all food types have equal value. Food variety rewards diversification — players benefit from maintaining multiple food sources even after bread becomes the staple. See TABLES.md ResourceConfig and RecipeConfig for specific values.
 
-### Resource Claiming
+Consumer goods (food, clothing, jewelry, tools) are produced through the economy and consumed by units over time. Food is delivered to homes by the merchant, a specialty worker at the market. The market is a meaningful infrastructure milestone — before building one, units fetch their own food, which is less efficient. A skilled merchant delivers more efficiently and naturally diversifies home food supplies, supporting the food variety mood bonus. Equipment degrades over time, and units replace their own gear from storage when needed — infrequent enough that it doesn't burden the economy. See ECONOMY.md for Merchant Delivery System. See BEHAVIOR.md for Equipment Wants and Home Food Self-Fetch.
 
-When a worker targets a map resource (tree, herb, berry bush), the tile is claimed via `tile.claimed_by = unit_id`, and the unit stores `unit.claimed_tile = tileIndex`. Other workers skip claimed tiles when searching. Claim is cleared on completion, abandonment, or unit death. The `claimed_tile` reference on the unit enables O(1) cleanup.
+RESOURCE COLLECTION
 
----
+Raw resources enter the economy through two methods. The player can **designate** map resources (trees, berry bushes) for direct collection — any idle serf walks to the designated resource, harvests it, and hauls the result to storage. No building required. This is the player's first tool for shaping the settlement: clearing trees for building space, gathering food before any infrastructure exists, and carving paths into the forest. Designation is the bootstrap — the way the settlement gets its first wood before a woodcutter's camp can be built.
 
-## Resource Gathering
+**Gathering buildings** (woodcutter's camp, gatherer's hut) automate what designation does manually — workers cycle between the hub and nearby resources without per-resource player input. Both remain useful throughout the game: designation for targeted, intentional collection; buildings for sustained production.
 
-### Building Work Patterns
+Designation and building-based gathering are identical from the player's perspective — a serf chopping a designated tree looks and behaves exactly the same as a serf chopping a tree for a woodcutter's camp. A woodcutter's camp effectively automates the task of designating trees. The player designates resources for chopping or foraging. See UI.md for designation interaction.
 
-Three patterns, all sharing the same inventory model:
+See BEHAVIOR.md Gathering Work Cycle for the unified handler.
 
-**Hub gathering (woodcutter's camp, gatherer's hut, hunting cabin).** Worker cycle starts and ends at the hub building. On each cycle, the worker checks if building output storage exceeds a threshold. If yes, they carry (not haul) a load to the nearest stockpile. If no, they find the nearest valid unclaimed resource, claim it, travel, gather, return, and deposit. No work radius — workers search the full map.
+STORAGE
 
-**Stationary extraction (mine, quarry, dock).** Worker goes to the building and works on site. Resources accumulate in building output inventory continuously while the worker is present. Placement terrain requirements: mine needs one edge entirely on rock, dock needs one edge entirely on water.
+Three storage building types serve different roles as the settlement grows. **Stockpiles** are the early-game generalist. **Warehouses** specialize in bulk stackable resources. **Barns** specialize in items.
 
-**Production crafting (smithy, bakery, etc.).** See Production System below.
+The progression gives the player a clear reason to build each type. Stockpiles remain useful at every stage as the only storage type that accepts everything. See ECONOMY.md for storage mechanics and TABLES.md for capacity values.
 
----
+Farms are player-sized open areas with a per-building crop selection. Three crops serve different roles: **wheat** is the riskiest but feeds the bread chain; **barley** is moderate and feeds the brewery; **flax** is the safest and feeds the tailor. Crop selection carries real weight — wheat is the greedy choice that rewards warm years, while barley and flax are safer bets against a short growing season. The player who diversifies has insurance; the player who plants all wheat gambles on the weather. See TABLES.md CropConfig for growth times and yields.
 
-## Production System
+The player can harvest early at reduced yield, creating real agency when frost approaches: lock in a partial return now, or wait for full maturity and risk losing everything. The player controls harvest timing — from fully manual to automatic — and can trigger an emergency harvest at any time. See ECONOMY.md for farm controls, crop growth mechanics, and frost interaction.
 
-Production buildings have separate input and output inventories. The worker cycle:
+Food production requires a meaningful commitment of settlement land.
 
-1. **Check output overflow** — if output storage exceeds threshold, carry output to nearest stockpile
-2. **Resume work-in-progress** — if WIP exists, continue crafting
-3. **Start new craft** — if no WIP and input has materials, consume from input and create WIP
-4. **Fetch materials** — if no materials in input, search the job queue for an unclaimed pull job targeting this building and resource; if found, claim it and fetch from source stockpile; if not found, self-fetch from nearest stockpile
+CARRYING AND GROUND PILES
 
-### Work-in-Progress
+Units carry resources as part of their work cycle. Resources are never destroyed due to lack of storage — they persist on the ground until collected. Ground drops are always temporary — a visible signal that the supply chain needs attention. See BEHAVIOR.md for carrying mechanics. See WORLD.md for speed penalty formula. See ECONOMY.md for ground drop rules.
 
-Materials are consumed from input when crafting begins. The WIP persists on the building if the worker is interrupted. Any worker assigned to the building can resume it. When progress reaches completion, output is added to the building's output inventory and the WIP is cleared.
+HAULING ORDERS
 
-### Carrying and Offloading
+Resource movement between storage buildings is controlled through **hauling orders** — player-created directives for logistics optimization.
 
-Units carry one resource type at a time (`CARRY_CAPACITY = 10` units per trip, fixed for all units). Carrying is part of the worker's primary job cycle (a woodcutter carrying logs to camp, a smith carrying iron from a stockpile), distinct from dedicated hauling jobs.
+Some players will never touch hauling orders — stockpile proximity to production buildings is the natural optimization lever. Other players will build elaborate routing networks to stage resources near production clusters. Both approaches work. See ECONOMY.md for the hauling order system.
 
-**Offloading** occurs when a worker carrying resources is reassigned to a different job type. They deposit to the nearest stockpile before starting the new job. If no stockpile has capacity, resources are lost and the player is notified. If a worker returns to the same job type after an interrupt and is still carrying resources, they resume at the delivery phase of their cycle.
-
----
-
-## Inventory and Storage
-
-### Slot-Based Inventory
-
-Stockpiles/warehouses and building inventories use a shared slot model. Each slot holds a single resource type with a capacity determined by `slot_capacity / resource_slot_size`. When depositing, fill an existing slot of that resource type first. If full, use an empty slot. If no empty slots or filter limit reached, reject.
-
-### Stockpiles
-
-A building type (`is_player_sized = true`). Player-placed, player-defined dimensions. Slot count equals tile footprint (width × height). `slot_capacity` = 20 (from BuildingConfig). Player-configurable filters with per-resource slot limits (default: accept all, max slots = total slot count). Free to build (no construction cost).
-
-### Warehouses
-
-A building type. Fixed size (4×4), 16 slots at `slot_capacity` = 60 per slot (from BuildingConfig). Player-configurable filters, same as stockpiles. Requires construction.
-
-### Building Inventories
-
-Production and gathering buildings have separate input and output inventories. Slot count, capacity, and accepted resources defined per building type in config. Building filters are fixed by type, not player-configurable.
-
-### Households
-
-Simple named fields with per-type capacity limits. Not part of the slot system.
-
-### Global Resource Display
-
-The UI shows a total per resource type, computed by summing all stockpile/warehouse slots, building inventory slots, household stores, and unit carrying amounts. Recomputed on demand, not stored state.
-
----
-
-## Hauling System
-
-### Terminology
-
-| Term | Meaning |
-|---|---|
-| **Hauler** | Dedicated T1 job. Claims hauling jobs from the queue. Strength affects hauling speed. |
-| **Hauling system** | Scans buildings with hauling rules. Posts hauling jobs based on push/pull thresholds. |
-| **Hauling job** | A job in the global queue to move one trip of resources between two locations. |
-| **Hauling rule** | Player-configurable push/pull threshold on a building. Defaults provided per building type. |
-| **Carrying** | Worker transporting resources as part of their primary job cycle. Not a hauling job. |
-| **Offloading** | Depositing carried resources when switching job types. |
-
-### Resource Flow
-
-All resource redistribution flows through stockpile/warehouse buildings as intermediaries. No direct building-to-building hauling. A production chain like mill → bakery goes: mill output → stockpile → bakery input.
-
-### Hauling Rules
-
-Rules live on each building as a `hauling_rules` table. BuildingConfig defines sensible defaults per building type (e.g., a smithy auto-pulls iron and auto-pushes tools/weapons/armor). Player can override defaults at runtime.
-
-A rule specifies the direction (push/pull), resource, and threshold — nothing else. The hauling system resolves the counterpart (nearest stockpile with capacity for push, nearest stockpile with stock for pull) at job-posting time.
-
-### Job Posting
-
-The hauling system scans periodically and posts jobs based on deficit:
-- **Push:** building output exceeds threshold → post jobs to move resources to a stockpile
-- **Pull:** building input is below threshold → post jobs to move resources from a stockpile
-
-Job count is deficit-based: enough jobs are posted to cover the deficit minus estimated resources already in transit. Each job represents one trip. The hauler picks up `CARRY_CAPACITY` (10) units per trip. Carry capacity is fixed for all units — this keeps deficit calculations exact.
-
-### Validation
-
-Haulers validate conditions when claiming a job (source still has resources, destination still has capacity/need). Stale jobs are discarded.
-
-### Worker Interaction
-
-Production workers during the fetch-materials phase of their cycle can claim unclaimed pull jobs targeting their building. This counts toward active jobs in the deficit calculation and prevents duplicate hauler trips.
-
----
-
-## Consumption Model
-
-### Eat at Home
-
-Units consume food, clothing, and luxury goods at their assigned home. Households track stocked goods. Mood modifiers are calculated per-household based on availability vs. tier expectations.
-
-### Market Distribution
-
-The Market is a staffed building. The Merchant pulls consumer goods from stockpiles and delivers them directly to homes via delivery routes. Uses greedy nearest-neighbor routing per trip, limited by carry capacity. Trading skill determines throughput.
-
-Without a market, units self-fetch from the nearest stockpile — functional but inefficient. The market replaces many individual fetch trips with one merchant doing delivery loops.
-
-### Communal Fallback
-
-Units without a home assignment eat from a communal stockpile directly. Mood penalty ("no home") pressures the player to build housing.
-
-### Consumer Goods
-
-- **Food** — bread, berries, meat, fish. Variety (distinct types in household) drives mood.
-- **Clothing** — tier-appropriate. Missing or wrong-tier = mood penalty.
-- **Beer** — consumed at the Tavern, not at home.
-- **Jewelry** — Gentry luxury good. Absence = Gentry mood penalty.
-
----
-
-## Production Chains
-
-### Food
-
-| Chain | Steps |
-|---|---|
-| Bread | Wheat Farm (Farmer, T1) → wheat → Mill (Miller, T1) → flour → Bakery (Baker, T2) → bread |
-| Berries | Gatherer's Hut (Gatherer, T1) → berries |
-| Meat | Hunting Cabin (Huntsman, T2) → meat |
-| Fish | Fishing Dock (Fisher, T1) → fish |
-
-Bread is most efficient at scale but requires three buildings and a Freeman baker. Berries and fish are simple but bottlenecked by natural supply. Meat requires a Freeman huntsman. Food variety drives household mood.
-
-### Alcohol
-
-| Chain | Steps |
-|---|---|
-| Beer | Barley Farm (Farmer, T1) → barley → Brewery (Brewer, T2) → beer |
-
-Beer is consumed at the Tavern. Barley competes with wheat and flax for farm plots.
-
-### Textiles
-
-| Chain | Steps |
-|---|---|
-| Clothing | Flax Farm (Farmer, T1) → flax → Tailor's Shop (Tailor, T2) → clothing |
-
-### Metal
-
-| Chain | Steps |
-|---|---|
-| Iron goods | Mine (Miner, T1) → iron → Smithy (Smith, T2) → tools, weapons, armor |
-| Steel goods | Mine (Miner, T1) → iron → Foundry (Armorer, T3) → steel → elite tools, weapons, armor |
-| Jewelry | Mine (Miner, T1) → rare gold/silver/gems → Jeweler's Workshop (Jeweler, T3) → jewelry |
-
-Iron is the baseline metal. Steel is a late-game upgrade: the Foundry refines iron into steel and produces finished elite goods. Precious metals and gems are rare erratic outputs from the mine.
-
-### Construction Materials
-
-| Source | Output |
-|---|---|
-| Woodcutter's Camp (Woodcutter, T1) | Logs |
-| Quarry (Stonecutter, T1) | Stone |
-
-No processing step — raw materials go directly to construction sites.
-
-### Medicine
-
-| Chain | Steps |
-|---|---|
-| Treatment | Forest (Herbalist, T2) → herbs → Infirmary (Healer/Physician, T2/T3) → treatment |
-
-### Farm Allocation
-
-Farms are a single building type with per-plot crop selection: wheat, barley, or flax. Three crops compete for farm space: wheat → bread (food), barley → beer (recreation), flax → clothing (mood).
-
----
+See TABLES.md for RecipeConfig, ResourceConfig, production chains, and BuildingConfig.
 
 ## Buildings
 
-### Housing
+Buildings have interior spaces that units can enter and work in. The player can see workers at their stations, patrons in the tavern, and families at home. See WORLD.md for building layout system and tile maps.
 
-| Building | Housing Tier |
-|---|---|
-| Cottage | Serf |
-| House | Freeman |
-| Manor | Gentry |
+The player can inspect buildings to see supply chain health at a glance. See UI.md for panel contents.
 
-Interior positions (beds) defined in building config, created on construction completion. Units are always visible — never hidden inside buildings. Player can toggle roof visibility to inspect interiors.
+Buildings rotate in four orientations at placement.
 
-### Agriculture
+Three housing types with no quality tiers — any unit can live in any housing type. They differ in bed count, size, and build cost.
 
-| Building | Notes |
-|---|---|
-| Farm Plot | Single type, per-plot crop selection (wheat, barley, flax) |
+Three storage types with distinct roles. See Storage above for design rationale.
 
-### Resource Extraction
+See TABLES.md for BuildingConfig and bed assignment. See WORLD.md for building layout and construction state.
 
-| Building | Job | Output | Placement |
-|---|---|---|---|
-| Woodcutter's Camp | Woodcutter (T1) | Logs | Pathable ground |
-| Mine | Miner (T1) | Iron, rare gold/silver/gems | One edge on rock |
-| Quarry | Stonecutter (T1) | Stone | Pathable ground |
-| Gatherer's Hut | Gatherer (T1) | Berries | Pathable ground |
-| Hunting Cabin | Huntsman (T2) | Meat | Pathable ground |
-| Fishing Dock | Fisher (T1) | Fish | One edge on water |
+The player can delete buildings. Deletion has real consequences — residents are displaced, stored resources spill onto the ground, and linked logistics are severed. Buildings under construction can also be deleted. See BEHAVIOR.md Building Deletion for the full cleanup sequence.
 
-### Processing
+## Events and Notifications
 
-| Building | Job | Input → Output |
-|---|---|---|
-| Mill | Miller (T1) | Wheat → flour |
-| Bakery | Baker (T2) | Flour → bread |
-| Brewery | Brewer (T2) | Barley → beer |
-| Tailor's Shop | Tailor (T2) | Flax → clothing |
-| Smithy | Smith (T2) | Iron → tools, weapons, armor |
-| Foundry | Armorer (T3) | Iron → steel → elite tools, weapons, armor |
-| Jeweler's Workshop | Jeweler (T3) | Gold/silver/gems → jewelry |
+**Sunday Service:** Weekly at Church. More effective with a skilled Priest.
 
-### Services
+**Funeral:** Triggered by unit death. Attendees receive a mood bonus.
 
-| Building | Job | Function |
-|---|---|---|
-| Market | Merchant (T2) | Delivers consumer goods to homes |
-| Church | Priest (T2) / Bishop (T3) | Sunday service, weekday prayer, funerals, weddings |
-| Infirmary | Healer (T2) / Physician (T3) | Treats sick/injured, consumes herbs |
-| Tavern | Barkeep (T2) | Recreation hub. Unstaffed: socializing only. Staffed: beer served, skill reduces consumption |
-| School | Teacher (T2) | Children grow Int/Wis/Cha. Teacher's scholarship skill sets growth rate |
-| Library | Scholar (T3) | Late-game scholarship and arcane research |
+**Marriage:** Permanent bond between two units. Can affect class standing. *Formation mechanics pending.*
 
-#### Church Details
-
-- **Monday–Saturday:** Priest prays (priesthood skill and Wisdom grow)
-- **Sunday:** All units attend service. Decaying mood modifier applied, quality scales with priesthood skill.
-- **Events:** Funerals (comfort modifier for bereaved) and weddings (mood boost for attendees) as they occur.
-
-#### Market Details
-
-Merchant delivers consumer goods from stockpiles to homes via greedy nearest-neighbor routes. Carry capacity limits deliveries per trip. Trading skill determines throughput. Without a market, households self-fetch.
-
-#### Tavern Details
-
-Units visit the Tavern to fulfill recreation need. Without a barkeep, units socialize only (partial recreation). With a staffed barkeep, beer is served — full recreation bonus. Higher barkeeping skill reduces beer consumed per visit, stretching barley supply further.
-
-### Storage
-
-| Building | Notes |
-|---|---|
-| Stockpile | Free, outdoor, player-defined dimensions, slot count = footprint tiles, slot_capacity = 20 |
-| Warehouse | Built, 4×4, 16 slots, slot_capacity = 60 |
-
-Both are building types in BuildingConfig. Stockpiles are the only building with player-defined dimensions.
-
-### Military
-
-| Building | Notes |
-|---|---|
-| Barracks | Military housing and training |
-| Watchtower | Early warning |
-| Walls/Palisade | Defensive perimeter |
-
-### Governance
-
-| Building | Notes |
-|---|---|
-| Town Hall | Unlocks when leader becomes baron |
-
----
-
-## Notifications
-
-The game notifies the player of important events. Some notifications can be configured to auto-pause or auto-slowdown via event speed controls.
-
-Current notification types:
-- Unit trapped (failed to path to any valid destination)
-- Storage full, resources lost (offloading failed)
-
-*Additional notification types pending.*
-
----
-
-## Sections Pending Design
-
-- **Map and world generation** — seed, parameters, biomes, starting layout and loadout
-- **UI/UX architecture** — interface design, information hierarchy, management tools
-- **Dynasty/succession implementation** — traversal mechanics
-- **Event system** — Changeling, Fey encounters, random occurrences
-- **Event speed controls** — configurable auto-pause/slowdown per event type
-- **Combat** — mechanics, military behavior, threat types
-- **Fey encounter mechanics** — faction structure, bargaining outcomes
-- **Magic system implementation** — spells, miracles, mechanical scope
-- **Deer mechanics** — movement, replenishment, hunting interaction
-- **Animal husbandry** — livestock, pastures (deferred)
-- **External trade** — caravans, external economy (scope TBD)
+**Notifications:** The game notifies the player of important events (unit trapped, storage full, no matching building for specialty). Some can be configured to auto-pause or auto-slowdown. See UI.md for notification types, display, and auto-pause rules. *Additional notification types and event speed controls pending.*

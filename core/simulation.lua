@@ -11,7 +11,7 @@ local events  = require("events.events")
 local simulation = {}
 
 function simulation:onTick(time)
-    time:updateClock()
+    time:advance()
 
     units:update(time)
 

@@ -1,7 +1,31 @@
 # Sovereign — CLAUDE.md
-*Coding reference for Claude Code. See CONTEXT.md for full rationale.*
+*v1 · Technical reference for Claude Code and Claude.ai design sessions.*
 
----
+> **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
+
+## Pending Review
+
+*Items added by Claude Code during implementation that need design review in the next Claude.ai chat session. Resolved items are removed during document updates at session end.*
+
+(none)
+
+## Technical Routing Table
+
+Detailed specs live in separate files. Read the relevant file before implementing a system. All files live at the repo root and are attached to the Claude.ai project.
+
+| File | Contents |
+|---|---|
+| **BEHAVIOR.md** | Tick order, hash offset, per-unit update loops (per-tick and per-hash), activity types and handlers, need interrupts (soft/hard, availability gating), sleep (time-of-day thresholds, wake check, sleep destination, collapse), eating behavior, home food self-fetch, carrying (rules, single-type invariant, weight cap), offloading, self-fetch and self-deposit (behavioral patterns), work cycles (designation, gathering, extraction, processing, farming), production order evaluation, work in progress, equipment want behavior, drafting, unit death cleanup, building deletion cleanup, classes and specialties (promotion, children, job filtering, skill growth). |
+| **ECONOMY.md** | Resource entities (stacks, items), containers (bin, tile inventory, stack inventory, item inventory, ground pile), reservation system (mechanism and lifecycle), resources module API, resource counts system, frost and farming (thaw/frost system, per-tile crop state, farm controls, farm job posting, harvest yield), ground piles (entity structure, ground drop search algorithm), hauling order system, merchant delivery system. |
+| **WORLD.md** | Map (dimensions, terrain, forest coverage, forest depth), map generation (noise setup, full pipeline, tuning), pathfinding (A*, tile costs, movement model, movement speed, collision, failure), building layout (tile types, tile maps, clearing, orientation, placement validation, construction state, buildings without tile maps, pathfinding integration), plant system (growth stages, spread, cursor scan), visibility (deferred). |
+| **TABLES.md** | Game entity data structures (unit, memory, tile, job, hauling order, production order, work in progress, building, world). All config tables (NeedsConfig, SleepConfig, MerchantConfig, HousingBinConfig, JobTypeConfig, SerfChildJobs, RecipeConfig, GrowthConfig, MoodThresholdConfig, MoodModifierConfig, InjuryConfig, IllnessConfig, MalnourishedConfig, ResourceConfig, PlantConfig, CropConfig, BuildingConfig). Production chains. |
+| **UI.md** | Camera, input handling, layout (right panel, left panel, bottom bar), selection mechanics, panel contents and variations, command panel, management overlays, notification display. |
+
+**BEHAVIOR.md vs ECONOMY.md boundary:** BEHAVIOR.md owns what units do — all step-by-step behavioral sequences including work cycles, self-fetch/deposit flows, carrying rules, equipment want behavior, and interrupt handling. ECONOMY.md owns what the resource system provides — entities, containers, the resources module API, reservations as a mechanism, and autonomous systems like the merchant and hauling orders. When a unit calls a resources module function, the call sequence lives in BEHAVIOR.md; the function's contract and implementation details live in ECONOMY.md. A task involving unit behavior should only need BEHAVIOR.md (plus TABLES.md). ECONOMY.md is loaded when working on resource infrastructure itself.
+
+**Simulation files vs UI file:** The domain files split into **simulation files** (BEHAVIOR.md, ECONOMY.md, WORLD.md, TABLES.md) and the **UI file** (UI.md). The simulation files own everything that would exist in a headless run — rules, state, behavior, formulas. UI.md owns how the player sees and interacts with the simulation — panels, input handling, camera, layout, interaction flows. None of it exists in a headless run.
+
+Claude Code should read the relevant file(s) before starting implementation. Most tasks require TABLES.md plus one domain file. This file (CLAUDE.md) is always loaded automatically.
 
 ## Stack
 
@@ -10,20 +34,20 @@
 - **Platform:** PC (Windows primary)
 - **Population cap:** ~200 units
 
----
-
 ## Folder Structure
 
 ```
-main.lua
-/core         -- gamestate, time, registry, world, simulation, log, save
-/simulation   -- unit.lua, jobs, needs, mood, health, hauling, building, household, dynasty
-/config       -- all config tables, constants.lua
-/ui           -- renderer, camera, input, overlay
-/events       -- event system, Fey, Changeling
+src/              -- Love2D root (launch with `love src`)
+  main.lua
+  core/           -- gamestate, time, registry, world, simulation, log, save
+  simulation/     -- unit.lua, jobs, needs, mood, health, hauling, building, dynasty, resources
+  config/         -- all config tables, constants.lua
+  ui/             -- renderer, camera, input, overlay
+  events/         -- event system, Fey
+tests/            -- plain Lua tests, run outside Love2D (lua tests/run.lua)
 ```
 
----
+All requires use paths relative to `src/` (e.g., `require("core.gamestate")`). Build a `.love` archive by zipping the contents of `src/`, not the repo root.
 
 ## Entry Point
 
@@ -34,47 +58,57 @@ if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then
 end
 ```
 
-Love2D callbacks delegate to `core/gamestate.lua`. Only the `playing` state runs the simulation.
-
----
+Love2D callbacks delegate to `core/gamestate.lua`. Only the `playing` state runs the simulation. The `src/` directory is the Love2D root — launch with `love src` from the repo root.
 
 ## Game State Machine
 
 Stack-based in `core/gamestate.lua`. States: `loading`, `main_menu`, `playing`. Each state is a table with hooks: `enter`, `exit`, `update(dt)`, `draw`, `keypressed`, `mousepressed`. `gamestate:switch(state)` for transitions. `gamestate:push`/`pop` reserved for future modal overlays.
 
----
+Quit-to-menu from `playing` tears down the current game (clear `world` and `registry`) and returns to `main_menu`. Quit from `main_menu` calls `love.event.quit()`.
 
 ## Conventions
 
-### Naming
+NAMING
+
 - `snake_case` for variables and table keys
 - `camelCase` for functions
-- String identifiers for equality-only checks (modifier sources, skill names, illness names, activity types, crop types, resource types, plant types)
-- Integer constants for ordered/comparable values (tier, priority, job tier, plant growth stage)
+- String identifiers for equality-only checks (modifier sources, skill names, illness names, activity types, crop types, resource types, plant types, trait identifiers, class names, specialty names, needs tier names, job type names, building tile types)
+- Integer constants for ordered/comparable values (priority, plant growth stage)
 - All boolean fields use `is_`, `has_`, `in_`, or `can_` prefix, no exceptions. `is_` for states/properties, `has_` for possession/presence, `in_` for membership/containment, `can_` for capability/permission.
+- Resource names are plural (wood, herbs, berries). Plant and map spawn item names are singular (tree, herb_bush, berry_bush).
+- Leave meaningful parameter names on stubs even if they produce unused-variable warnings. Do not suppress with `_` or `_name` — that erases intent.
 
-### Method Syntax
-- Colon (`:`) for method definitions and calls — anything with `self`
-- Dot (`.`) for field access and static/utility functions
+ERROR HANDLING
 
-### Error Handling
 - Prefer hard failures over silent ones — access config tables and variables directly, let Lua throw on nil
 - Use `assert` only when a clearer error message is worth the extra line
 - Never guard against missing data with `if x then` when missing data indicates a programming error
-- Use `== false` instead of `not`
+- Use `== false` instead of `not` — the keyword `not` is easy to miss when reading code, and `== false` makes boolean checks visually explicit
 
-### Linter Warnings
-- Leave meaningful parameter names on stubs even if they produce unused-variable warnings.
-  A warning on `time` or `unit` signals "this will be used when the stub is implemented."
-  Do not suppress with `_` or `_name` — that erases intent.
+BIDIRECTIONAL REFERENCES
 
-### IDs
-- One global incrementing counter for all entity types (units, memories, buildings, jobs, furniture, hauling rules)
-- Counter lives on the registry module: `registry:nextId()`
-- A unit's `id` persists when they die and become a memory
-- Plants (trees, herbs, berry bushes) are tile data — no IDs
+Prefer bidirectional references for entity relationships. Both sides should be maintained on create and destroy.
 
-### Flat Index Convention
+Examples: `unit.home_id` ↔ `building.housing.member_ids`, `unit.job_id` ↔ `job.claimed_by`, `unit.claimed_tile` ↔ `tile.claimed_by`, `unit.target_tile` ↔ `tile.target_of_unit`, `unit.bed_index` ↔ `bed.unit_id`, `unit.friend_ids` ↔ counterpart's `friend_ids`, `building.posted_job_ids` ↔ `job.target_id`, `building.hauling_order_ids` ↔ `hauling_order.source_id`/`destination_id`.
+
+Rationale: simplifies cleanup (if a building is deleted, its `posted_job_ids` immediately identifies affected jobs and their claimants, its `hauling_order_ids` identifies orders to remove) and makes traversal straightforward in both directions. Bidirectional refs are appropriate for stable entity relationships — not for transient operational state like private haul jobs (those are found via the unit walk during deletion).
+
+IDS
+
+One global incrementing counter for all entity types (units, memories, buildings, jobs, stacks, items, hauling orders, ground piles). Counter lives on the registry module: `registry.nextId()`. A unit's `id` persists when they die and become a memory. Plants (trees, herbs, berry bushes) are tile data — no IDs.
+
+CONFIG-TO-RUNTIME NAMING
+
+BuildingConfig uses `default_` prefixed fields for values that are copied to runtime building fields on construction: `default_production_orders` → `building.production.production_orders`. The runtime field drops the `default_` prefix.
+
+CLAUDE CODE GUIDANCE
+
+- Claude Code may update CLAUDE.md and the technical reference files to reflect implementation details: function signatures, module locations, call patterns, actual field names used in code.
+- Claude Code does **not** add, change, or remove design decisions. If implementation reveals a design gap or forces a choice not covered by the specs, add a brief note to the **Pending Review** section at the top of this file. Do not decide and document it as settled.
+- The test: "Would Ross want to discuss this before it was locked in?" If yes, it goes in Pending Review.
+
+FLAT INDEX CONVENTION
+
 ```lua
 function tileIndex(x, y)
     return (x - 1) * MAP_HEIGHT + y
@@ -89,36 +123,58 @@ end
 
 All spatial lookups use `tileIndex(x, y)`. Applied to: tile grid, growing plant data, visibility sets, and all spatial lookups.
 
-### Module Pattern
-- Local requires per file. Each file declares dependencies at the top. No globals for module references.
-- Entity creation via factory functions on owning modules. One call allocates ID, builds entity, inserts into registry + typed list.
+MODULE PATTERN
 
-### Architecture
+Local requires per file. Each file declares dependencies at the top. No globals for module references. Entity creation via `registry.createEntity(collection, entity)` — one call allocates ID, inserts into the typed array and registry, returns the entity. Modules define factory functions that build the entity table (they know the shape) and delegate the id/insert/register step.
+
+```lua
+function registry.createEntity(collection, entity)
+    entity.id = registry.nextId()
+    collection[#collection + 1] = entity
+    registry[entity.id] = entity
+    return entity
+end
+```
+
+OWNERSHIP MODEL
+
+`world` owns all game state: every entity array, time, magic, settings. Modules own behavior, not data. `units.update(time)` iterates `world.units`. `jobs.postJob(...)` inserts into `world.jobs`. Serialization saves `world` and `registry.next_id`. Teardown clears `world` and `registry`.
+
+SWEEP CONVENTION
+
+Every entity type that can be removed uses the same swap-and-pop pattern in a per-module sweep function. Units have `units.sweepDead`. Buildings have `buildings.sweepDeleted` (runs after `units.sweepDead` — see BEHAVIOR.md Building Deletion). Stacks, items, and jobs each have their own sweep with a type-appropriate removal condition (e.g., `amount == 0` for stacks, `durability <= 0` for items). Each sweep function handles its own cleanup before removal (clearing inbound references) and calls `registry[entity.id] = nil` followed by swap-and-pop on the `world.*` array. Not a shared utility — each module writes its own loop. The convention is the consistent shape. Ground piles follow the same pattern — sweep when `#contents == 0`, clear `tile.ground_pile_id` before removal.
+
+ARCHITECTURE
+
+- OO, not ECS — at ~200 units, ECS adds complexity without performance benefit.
 - Units carry state. Config tables carry rules. Systems read both.
-- Tier-based behavioral differences live in config tables keyed by tier — not on the unit.
-- Skill caps live in job config tables — not on the unit.
-- All 15 skill keys present on every unit at 0 regardless of tier. Tier gate enforced at job eligibility, not data level.
-- Hybrid registry: `registry[id]` for cross-type lookup; each module maintains typed arrays for iteration.
-- Deferred deletion: `is_dead = true` flag, update loops skip, `units:sweepDead` at end of tick (swap-and-pop). All cleanup (social, job, tile claim, building, household, dynasty) happens eagerly in sweepDead.
+- Class-based behavioral differences live in config tables keyed by class — not on the unit.
+- Composition over inheritance for units — class differences are data, not behavior. Single shallow `Unit` prototype. No subclasses — avoids runtime class-swapping on promotion. Single `unit.lua` file.
+- All skill keys present on every unit at 0 regardless of class. Serfs and gentry never grow skills. Only specialty freemen and clergy grow skills.
+- Hybrid registry: `registry[id]` for cross-type lookup; `world.*` arrays for typed iteration.
+- Deferred deletion: `is_dead`/`is_deleted` flag, update loops skip, sweep at end of tick (swap-and-pop). Unit cleanup (social, job, tile claim, home, bed, dynasty, ground pile drops) happens eagerly in `units.sweepDead`. Building cleanup (unit walk for private hauls, posted job cleanup, container drops, tile clearing, resident eviction, hauling order removal) happens eagerly in `buildings.sweepDeleted`.
+- All social relationships (friends, enemies) are bidirectional. When unit A befriends unit B, both `A.friend_ids` and `B.friend_ids` are updated. Death cleanup iterates only the dead unit's relationship lists (max 6 lookups), not all living units.
+- All rate values stored as per-tick — use conversion constants in config tables.
 
-### Lua Performance
+LUA PERFORMANCE
+
 - **Never create tables in per-tick code.** Reuse buffers, pre-allocate and clear.
 - **Flat index for spatial lookups.** Integer keys use Lua's array part (direct C array access).
 - **Prefer numeric `for` loops** over `ipairs`/`pairs` in hot paths.
 - **Localize globals** in hot files: `local math_floor = math.floor`.
 - **No string concatenation for keys.** Use integer-indexed tables or flat index math.
 
----
-
 ## Constants
 
-All constants in `/config/constants.lua`.
+All constants in `config/constants.lua`.
 
 ```lua
-Tier     = { SERF = 1, FREEMAN = 2, GENTRY = 3 }
-JobTier  = { T1 = 1, T2 = 2, T3 = 3 }
+-- Priorities
 Priority = { DISABLED = 0, LOW = 1, NORMAL = 2, HIGH = 3 }
 InterruptLevel = { NONE = 0, SOFT = 1, HARD = 2 }
+
+-- Classes are string identifiers, not integer enums (no natural ordering)
+-- Valid classes: "serf", "freeman", "clergy", "gentry"
 
 -- Map
 MAP_WIDTH  = 400
@@ -126,25 +182,29 @@ MAP_HEIGHT = 200
 SETTLEMENT_COLUMNS = 200
 FOREST_START       = 201
 
--- Calendar
+-- Calendar (authored values)
 MINUTES_PER_HOUR = 60
 HOURS_PER_DAY    = 24
 DAYS_PER_SEASON  = 7
 SEASONS_PER_YEAR = 4
+
+-- Calendar (derived)
 DAYS_PER_YEAR    = DAYS_PER_SEASON * SEASONS_PER_YEAR   -- 28
 HOURS_PER_SEASON = HOURS_PER_DAY * DAYS_PER_SEASON      -- 168
 HOURS_PER_YEAR   = HOURS_PER_SEASON * SEASONS_PER_YEAR  -- 672
 
--- Tick system
+-- Tick system (authored values)
 TICK_RATE        = 60
 HASH_INTERVAL    = 60
 TICKS_PER_MINUTE = 25
+
+-- Tick system (derived)
 TICKS_PER_HOUR   = 1500
 TICKS_PER_DAY    = 36000
 TICKS_PER_SEASON = 252000
 TICKS_PER_YEAR   = 1008000
 
--- Conversion helpers
+-- Derived conversion helpers (per-tick rates — not design decisions)
 PER_MINUTE = 1 / TICKS_PER_MINUTE
 PER_HOUR   = 1 / TICKS_PER_HOUR
 PER_DAY    = 1 / TICKS_PER_DAY
@@ -153,29 +213,58 @@ PER_SEASON = 1 / TICKS_PER_SEASON
 -- Speed
 Speed = { NORMAL = 1, FAST = 2, VERY_FAST = 4, ULTRA = 8 }
 
--- Schedule
-WAKE_HOUR  = 6
-SLEEP_HOUR = 22
-DAY_START  = 6
-DAY_END    = 18
-CHURCH_DAY = 1   -- Sunday
+-- Schedule (sleep periods — see SleepConfig in TABLES.md and BEHAVIOR.md Sleep)
+MORNING_START = 5    -- morning lerp begins (night → day thresholds)
+DAY_START     = 7    -- day band begins (flat day thresholds)
+EVENING_START = 20   -- evening lerp begins (day → night thresholds)
+NIGHT_START   = 0    -- night band begins at midnight (flat night thresholds)
+CHURCH_DAY    = 1    -- Sunday
 
 -- Aging
 AGES_PER_YEAR    = SEASONS_PER_YEAR
 AGE_OF_ADULTHOOD = 16
+AGE_OF_SCHOOLING = 6
+
+-- Frost (rolled at year start — exact day ranges TBD during tuning)
+-- THAW_DAY_MIN / THAW_DAY_MAX: range for spring thaw day roll
+-- FROST_DAY_MIN / FROST_DAY_MAX: range for autumn frost day roll
+-- FROST_WARNING_DAYS: days before frost_day that "frost approaching" notification fires
+-- FROST_DECAY_RATE: maturity loss per tick on unharvested crops after frost arrives (TBD)
 
 -- Plants
 SPREAD_TILES_PER_TICK = 50
-SPREAD_CHANCE         = 0.01
-SPREAD_RADIUS         = 4
-SEEDLING_GROWTH_TICKS = 0    -- TBD
-YOUNG_GROWTH_TICKS    = 0    -- TBD
 
--- Visibility
-SIGHT_RADIUS = 8
+-- Visibility (designed but deferred — all tiles explored/visible until implemented)
+SIGHT_RADIUS        = 8
+FOREST_SIGHT_RADIUS = 3    -- TBD exact value
 
--- Hauling
-CARRY_CAPACITY = 10    -- units of any resource per trip, fixed for all units
+-- Movement
+BASE_MOVE_COST       = 6     -- ticks per tile on open ground
+TREE_MOVE_MULTIPLIER = 3.0   -- trees stage 2+ slow movement (don't block)
+SQRT2                = math.sqrt(2)  -- diagonal movement cost multiplier
+
+-- Carrying
+CARRY_WEIGHT_MAX  = 32       -- max total weight a unit can carry
+MAX_CARRY_SLOW    = 0.5      -- max speed reduction at full weight and 0 strength
+
+-- Storage
+STOCKPILE_TILE_CAPACITY      = 64   -- weight capacity per stockpile tile
+WAREHOUSE_CAPACITY            = 128  -- total weight capacity for warehouse
+GROUND_PILE_PREFERRED_CAPACITY = 64   -- soft cap: drop function prefers to spread to adjacent tiles above this
+
+-- Ground drops
+GROUND_DROP_SEARCH_RADIUS = 0   -- Manhattan distance to search for an empty tile when dropping
+
+-- Food
+FOOD_VARIETY_WINDOW = 3 * TICKS_PER_DAY   -- food types eaten within this window count for variety bonus
+
+-- Building layout tile types
+TILE_WALL  = "W"    -- impassable
+TILE_FLOOR = "F"    -- passable interior
+TILE_DOOR  = "D"    -- passable, on perimeter, building entrance
+
+-- Building
+CLEARING_DEPTH = 1  -- tiles in front of door face that cannot have buildings placed on them
 
 -- Rendering
 TILE_SIZE = 32
@@ -187,512 +276,79 @@ DAY_NAMES    = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday
 SEASON_NAMES = { "Spring", "Summer", "Autumn", "Winter" }
 ```
 
----
+## Dev Tools and Testing
 
-## Debugging Tools
+LOG SYSTEM (`core/log.lua`)
 
-### Log System (`core/log.lua`)
 Categories: `TIME`, `UNIT`, `JOB`, `WORLD`, `HEALTH`, `HAUL`, `SAVE`, `STATE`. Severity levels: OFF, ERROR, WARN, INFO, DEBUG. Ring buffer of last 200 messages for overlay. `log:info("UNIT", "Unit %d claimed job %d", unit.id, job.id)`.
 
-### Developer Overlay (`ui/overlay.lua`)
-Toggled with F3. Stats bar: FPS, game_time, speed, unit/building/job counts. Tile inspector on hover: coordinates, terrain, plant_type/plant_growth, forest_depth, building_id, claimed_by, visibility. Log tail: last ~10 messages.
+DEVELOPER OVERLAY (`ui/overlay.lua`)
 
----
+Toggled with F3. Stats bar: FPS, game_time, speed, unit/building/job counts. Tile inspector on hover: coordinates, terrain, plant_type/plant_growth, forest_depth, building_id, ground resources, claimed_by, visibility. Log tail: last ~10 messages.
+
+CONFIG VALIDATION (STARTUP)
+
+Runs during the `loading` game state — the game never reaches `playing` with broken config. Walks all config tables and asserts cross-references are valid:
+
+- Every RecipeConfig input/output key exists in ResourceConfig
+- Every BuildingConfig `job_type` references a valid JobTypeConfig key
+- Every JobTypeConfig entry with `skill` references a valid key in the unit skills table
+- Every BuildingConfig with `category == "processing"` has `max_workers == 1`
+- Every BuildingConfig with `tile_map` has exactly one D tile, all layout positions fall on F or D tiles, all F/D tiles are contiguous and reachable from D, all non-D perimeter tiles are W
+- Every MerchantConfig bin_threshold key exists in ResourceConfig
+- Every ResourceConfig entry with `is_stackable == false` has `max_durability`
+- Every ResourceConfig entry with `nutrition` has `is_stackable == true`
+- Every ResourceConfig entry with `tool_bonus` has `is_stackable == false`
+- Every BuildingConfig processing `input_bins` type matches a key in the building's recipe inputs
+- Every HousingBinConfig type matches a valid ResourceConfig key
+
+Errors use `error()` or `assert` with descriptive messages. No graceful fallback — broken config is a programming error.
+
+LOGIC TESTS (OFFLINE)
+
+Live in `tests/`. Run outside Love2D with `lua tests/run.lua` from the repo root. Test pure logic where incorrect math or edge cases are hard to catch visually:
+
+- Need drain rates and interrupt thresholds
+- Carrying weight / speed penalty formula
+- Mood recalculation (modifier stacking, food variety counting)
+- A* pathfinding (optimal paths, impassable tiles, escape case, diagonal rules)
+- Hash offset distribution
+- Resource transfer (split, merge, capacity clamping)
+- Resource count tally accuracy (running tallies match full recount)
+
+Tests are added per-system as that system is implemented — not batched per-phase.
+
+NOT TESTED
+
+Rendering, UI, camera, input handling, high-level integration (e.g., "does a woodcutter complete a full work cycle"). These are faster to verify by watching the game run.
 
 ## Module Ownership
 
 | Module | Owns |
 |---|---|
 | **Game State** | State stack, current state, Love2D callback delegation. |
-| **Time** | Clock state (tick, game_minute, game_hour, game_day, game_season, game_year). Accumulator and speed. Provides `hashOffset()`. Does not know about other systems. |
-| **Simulation** | The `onTick` orchestrator. Calls module update functions in order. Owns no data. |
-| **World** | Tile grid, buildings (array, swap-and-pop), forest depth map, plant cursor scan, growing plant data, visibility state. Posts jobs to the queue. |
-| **Units** | Unit state: attributes, skills, needs, mood, health, relationships, tier, current activity, carrying, drafted state. Owns creation, death, promotion/demotion. Owns per-unit visibility sets. `units.all` is an array; swap-and-pop on dead sweep. |
-| **Job Queue** | Standalone module. Single flat array of all work tasks (regular + hauling). Swap-and-pop deletion. World and hauling system post; units query and claim. |
-| **Hauling System** | Scans buildings with hauling rules. Posts hauling jobs based on push/pull thresholds. Deficit-based posting. |
-| **Dynasty** | Succession logic, leader tracking. Reads unit relationship graphs. |
-| **Events** | Changeling, Fey encounters, random occurrences, funerals, weddings, Sunday service. Reads/modifies world and units. |
-| **Registry** | Global lookup: `registry[id]` returns any entity (unit, memory, building, job). Single hash-table pool. Owns global ID counter (`registry:nextId()`). |
+| **Time** | Clock behavior: `advance()`, `accumulate(dt)`, `hashOffset()`, `getEnergyThresholds()`. Operates on `world.time`. |
+| **Simulation** | The `onTick` orchestrator. Owns no data. |
+| **World** | Tile grid, forest depth map, plant system. Owns all entity arrays and game state: `world.units`, `world.buildings`, `world.jobs`, `world.stacks`, `world.items`, `world.hauling_orders`, `world.time`, `world.magic`, `world.settings`. Ground resource storage is implementation-dependent. |
+| **Units** | Unit lifecycle and behavior (creation, death, promotion). Operates on `world.units`. |
+| **Resources** | Stack/item creation, destruction, transfer, counting. Maintains `world.resource_counts`. Operates on `world.stacks` and `world.items`. |
+| **Job Queue** | Job posting and filtering logic. Operates on `world.jobs`. |
+| **Hauling Orders** | Hauling order scanning and job posting. Operates on `world.hauling_orders`. |
+| **Magic** | Spell execution. Operates on `world.magic`. |
+| **Dynasty** | Succession logic, leader tracking. |
+| **Events** | Scheduled and triggered events. |
+| **Registry** | Global ID-based lookup across all entity types. Entity creation helper. |
 | **Log** | Ring buffer, severity filtering, file output. |
-| **Save** | Serialization/deserialization via Lua table literals and `love.filesystem`. |
-
----
-
-## Main Loop
-
-```lua
-function love.update(dt)
-    gamestate:update(dt)
-end
-
--- Inside the playing state:
-function playing:update(dt)
-    if time.is_paused == false then
-        local ticks_this_frame = time:accumulate(dt)
-        for i = 1, ticks_this_frame do
-            time:advance()
-            simulation:onTick(time)
-        end
-    end
-end
-```
-
----
-
-## Simulation Loop
-
-```lua
-function simulation:onTick(time)
-    time:updateClock()
-    units:update(time)
-    world:updateBuildings(time)
-    world:updateResources(time)
-    world:updatePlants(time)
-    units:sweepDead(time)
-end
-```
-
-Calendar-driven logic uses modulo checks in `simulation:onTick`, not inside individual systems:
-
-```lua
-if time.tick % TICKS_PER_SEASON == 0 then
-    units:processSeasonalAging(time)
-end
-```
-
----
-
-## Hash Offset System
-
-```lua
-function hashOffset(id)
-    return (id * 7919) % HASH_INTERVAL
-end
-
-function units:update(time)
-    for i = 1, #self.all do
-        local unit = self.all[i]
-        if unit.is_dead == false then
-            if (time.tick + hashOffset(unit.id)) % HASH_INTERVAL == 0 then
-                unit:update(time)
-            end
-        end
-    end
-end
-```
-
-### Per-Unit Update Order
-1. **Drain needs** (satiation, energy, recreation drain toward 0)
-2. **Check hard need interrupts** (drop everything, self-assign) — skipped if `is_drafted`
-3. **Check soft need interrupts** (finish delivery, then self-assign) — skipped if `is_drafted`
-4. **Offload check** — if carrying and not mid-delivery, deposit first
-5. **Poll job queue** — if idle, scan for best job — skipped if `is_drafted`
-6. **Execute work progress** (grow attribute; grow skill if T2/T3 and below cap)
-7. **Recalculate mood** (stateless)
-8. **Recalculate health** (stateless; death check at health <= 0)
-
-Drafted units: steps 1, 6, 7, 8 run normally. Steps 2, 3, 5 skipped. Exception: energy hits 0 → auto-undraft, force sleep.
-
----
-
-## Map
-
-400x200 tile grid, 1-indexed. Columns 1–200 = settlement. Columns 201–400 = forest. `forest_depth` 0.0 in settlement, linear 0.0–1.0 in forest. `forest_danger = depth²`.
-
-Terrain types: grass, dirt (both pathable), rock (impassable), water (impassable). Lakes only. No rivers. No elevation.
-
-Tile grid stored as flat array using `tileIndex(x, y)`.
-
----
-
-## Plant System
-
-Plants are tile data, not entities. Three types: tree, herb, berry_bush.
-
-```lua
-tile.plant_type   = nil       -- nil | "tree" | "herb" | "berry_bush"
-tile.plant_growth = 0         -- 0=empty, 1=seedling, 2=young, 3=mature
-```
-
-When `plant_growth == 0`, `plant_type` must be `nil`. When `plant_growth > 0`, `plant_type` identifies what's growing.
-
-Trees block pathing at stage 2+. Herbs and berry bushes never block pathing. Trees block vision at stage 2+ with ≥1 tree neighbor. Herbs and berry bushes never block vision.
-
-**Harvest:** Trees → chopping sets growth=0, type=nil (permanent removal). Herbs/berry bushes → gathering resets growth to 1 (regrowth).
-
-Cursor scan: `SPREAD_TILES_PER_TICK` (50) tiles per tick, linear wrap. Seedling/young → promote if enough ticks elapsed (defer tree seedling→young if unit on tile). Mature → spread same type to random tile within manhattan distance `SPREAD_RADIUS` (4).
-
-Growth data: `world.growing_plant_data[tileIndex(x, y)] = planted_tick`. Stages 1–2 only. Removed on promotion to mature.
-
-Safety: no spread adjacent to buildings.
-
----
-
-## Visibility System
-
-`tile.is_explored` (permanent) + `tile.visible_count` (current unit count). Recursive shadowcasting per unit, radius `SIGHT_RADIUS` (8). Recompute on tile change only. Double-buffered visibility sets per unit. Reveal events on `visible_count` 0→1.
-
-Vision blockers: trees (`plant_type == "tree"`) stage 2+ with ≥1 tree neighbor. Buildings. Rock. Herbs and berry bushes never block. First blocker is visible; shadow behind.
-
----
-
-## Drafting
-
-```lua
-unit.is_drafted = false
-```
-
-Drafted: skip job polling and need interrupts. Needs still drain. Player issues move commands. Mid-job when drafted → abandon (progress persists, claim cleared). Energy hits 0 → auto-undraft + force sleep. Undrafting resumes normal behavior on next hashed update.
-
----
-
-## Unit Death Cleanup (sweepDead)
-
-All cleanup runs eagerly at end of tick in `units:sweepDead`:
-1. Convert to memory (preserves family graph)
-2. Update registry (id now points to memory)
-3. Social cleanup (remove from all living units' friend_ids/enemy_ids)
-4. Family references stay (father_id/spouse_id pointing to memory is correct)
-5. Job cleanup (clear claimed_by if had current_job_id)
-6. Tile claim cleanup (clear `tiles[unit.claimed_tile].claimed_by`)
-7. Building cleanup (remove from worker_ids)
-8. Home cleanup (remove from household member_ids)
-9. Dynasty check (trigger succession if is_leader)
-10. Remove from units.all (swap-and-pop)
-
----
+| **Save** | Serialization/deserialization. |
+| **Camera** | Position, zoom, coordinate conversion. |
+| **Input** | Input abstraction and action map. |
+| **Overlay** | Dev overlay rendering. Pure UI, never writes to simulation. |
+| **Renderer** | Tile, building, unit, ground pile rendering. Fog of war. |
 
 ## Serialization
 
-Pure Lua table literals via `love.filesystem`. Versioned format. Each module has `:serialize()` / `:deserialize()`.
+Pure Lua table literals via `love.filesystem`. Versioned format. Each module has `.serialize()` / `.deserialize()`.
 
-**Saved:** time, tiles (skip visibility), units (skip visibility buffers), memories, buildings, households, jobs, dynasty, registry next_id, player settings.
+**Saved:** `world` (all entity arrays: units, buildings, jobs, stacks, items, hauling_orders, ground_piles; tiles skipping visibility; time, magic, settings), memories, dynasty, `registry.next_id`, player settings.
 
-**Rebuilt on load:** registry hash table, per-unit visibility buffers, tile.is_explored/visible_count, module typed arrays.
-
----
-
-## Architectural Directives
-
-- **OO, not ECS**
-- **Single `unit.lua`** — no split unit files
-- **Single global job queue** for all job types including hauling — unified job structure with type-specific fields
-- **Job tie-breaking** by weighted combination of distance and job age
-- **Two-tier need interrupts** — soft (finish delivery) and hard (immediate). Needs never posted as jobs.
-- **Three needs only:** satiation, energy, recreation. Spirituality is NOT a need.
-- **Mood and health are stateless** — recalculated from scratch each hashed update
-- **Skill caps on the job, not the unit** — all 15 skill keys on every unit at 0
-- **Workers own their full job cycle** — carrying is part of the job, not a separate hauling task
-- **Fixed carry capacity** — `CARRY_CAPACITY = 10` for all units. Strength affects hauling speed, not amount.
-- **Offloading** — when switching job types while carrying, deposit to nearest stockpile first
-- **Single resource type carried at a time** — deposit before starting new work
-- **Blueprint-based buildings** — no room detection; interiors are spatial data from config
-- **Building placement rules** — most need pathable ground; mines need rock edge; docks need water edge
-- **Stockpiles are buildings** — `is_player_sized = true`, player-defined dimensions. No separate stockpile array.
-- **Unified building inventory model** — input/output inventories using slot system; three work patterns (hub gathering, stationary extraction, production crafting)
-- **slot_capacity per building type** — defined in BuildingConfig, not as global constants
-- **Hauling rules on buildings** — push/pull thresholds, defaults from BuildingConfig, player-overridable. One job = one trip = one worker. Deficit-based posting.
-- **Stockpiles as intermediary** — all redistribution flows through stockpile/warehouse buildings, no direct building-to-building
-- **Slot-based inventory** — slot_capacity / resource slot_size = units per slot
-- **Plants are tile data** — not entities, no IDs, no registry. Three types: tree, herb, berry_bush.
-- **Tree harvest destroys, herb/berry harvest regrows** — chopping → growth=0/type=nil; gathering → growth=1
-- **Cursor-based plant updates** — fixed budget per tick, linear scan, all plant types in one pass
-- **Shadowcasting visibility** — per unit, recompute on tile change, double-buffered
-- **Single-zone map** — 400×200, settlement left, forest right
-- **Flat index convention** — `tileIndex(x, y)` for all spatial lookups
-- **All rate values stored as per-tick** — use conversion constants in config tables
-- **Market delivery model** — merchant walks greedy nearest-neighbor route to homes
-- **Eager death cleanup** — all references cleaned in sweepDead. Unit stores `claimed_tile` for O(1) tile cleanup.
-- **Hybrid registry** — global hash lookup + per-module typed arrays
-- **Local requires per file** — no globals for module references
-- **Input abstraction** — game code references actions, not physical keys
-- **Game state machine** — stack-based, Love2D callbacks delegate to current state
-- **Pure Lua table serialization** — versioned save files, visibility rebuilt on load
-- **Drafting** — `is_drafted` flag skips job polling and need interrupts. Energy=0 → auto-undraft + force sleep.
-
----
-
-## Data Structures
-
-### Unit
-```lua
-unit = {
-    id = 0, name = "", tier = Tier.SERF,
-    is_dead = false,
-    is_drafted = false,
-    age = 0,
-    birth_day = 0, birth_season = 0,
-    is_child = true,
-    is_attending_school = false,
-
-    is_leader = false,
-
-    father_id = nil, mother_id = nil,
-    child_ids = {}, spouse_id = nil,
-    friend_ids = {}, enemy_ids = {},    -- up to 3 each
-
-    attributes = {
-        strength = 0, dexterity = 0, intelligence = 0,
-        wisdom = 0, charisma = 0,
-    },
-    skills = {
-        -- All units get all keys at 0. Serfs never grow skills.
-        melee_combat = 0, smithing = 0, hunting = 0, tailoring = 0,
-        baking = 0, brewing = 0, construction = 0, scholarship = 0,
-        herbalism = 0, medicine = 0, priesthood = 0, barkeeping = 0,
-        trading = 0, jewelry = 0, leadership = 0,
-    },
-    needs = {
-        satiation = 100, energy = 100, recreation = 100,
-    },
-
-    mood = 0,
-    mood_modifiers = {},    -- { source, value, ticks_remaining }
-
-    health = 100,
-    health_modifiers = {},
-
-    carrying = nil,         -- { resource = "logs", amount = 3 } or nil
-    claimed_tile = nil,     -- tileIndex of claimed resource tile, or nil
-
-    current_job_id = nil,
-    current_activity = nil,
-    home_id = nil,
-    bed_index = nil,
-    x = 0, y = 0,
-
-    -- Visibility (double buffer, keyed by tileIndex)
-    visible_a = {},
-    visible_b = {},
-    active_visible = "a",
-}
-```
-
-### Memory (Dead Unit)
-```lua
-memory = {
-    id = 0, name = "",
-    father_id = nil, mother_id = nil,
-    child_ids = {}, spouse_id = nil,
-    death_day = 0, death_season = 0, death_year = 0,
-    death_cause = "",
-}
-```
-
-### Tile
-```lua
-tile = {
-    terrain = "grass",       -- "grass" | "dirt" | "rock" | "water"
-    plant_type = nil,        -- nil | "tree" | "herb" | "berry_bush"
-    plant_growth = 0,        -- 0=empty, 1=seedling, 2=young, 3=mature
-    building_id = nil,
-    forest_depth = 0.0,
-    is_explored = false,
-    visible_count = 0,
-    claimed_by = nil,        -- unit_id claiming resource for gathering
-}
-```
-
-### Job (unified structure)
-```lua
-job = {
-    id = 0,
-    type = "chop_tree",      -- keys into JobConfig, or "haul"
-    claimed_by = nil,
-    posted_tick = 0,         -- tick when posted, for age-based tie-breaking
-
-    -- Regular job fields (nil for hauling)
-    x = 0, y = 0,
-    target_id = nil,
-    progress = 0,
-
-    -- Hauling job fields (nil for regular)
-    resource = nil,
-    source_id = nil,         -- building id
-    destination_id = nil,    -- building id
-}
-```
-
-### Building
-```lua
-building = {
-    id = 0, type = "cottage",
-    x = 0, y = 0, width = 0, height = 0,
-    is_built = false, build_progress = 0,
-    interior = {},
-    crop = nil,
-
-    worker_ids = {},
-    worker_limit = 0,
-
-    input = nil,             -- inventory or nil
-    output = nil,            -- inventory or nil
-
-    hauling_rules = nil,     -- { { direction = "push", resource = "logs", threshold = 15 }, ... } or nil
-
-    work_in_progress = nil,  -- { recipe, progress, work_required } or nil
-}
-```
-
-### Inventory
-```lua
-inventory = {
-    slots = {
-        { resource = "logs", amount = 3 },
-        { resource = nil, amount = 0 },
-    },
-    slot_capacity = 20,      -- defined per building type in BuildingConfig
-    filters = { logs = 4, stone = 4 },
-}
-```
-
-### Household
-```lua
-household = {
-    building_id = 0,
-    member_ids = {},
-    food = { bread = 0, berries = 0, meat = 0, fish = 0 },
-    clothing = 0,
-    jewelry = 0,
-    max_food_per_type = 10,
-    max_clothing = 5,
-    max_jewelry = 2,
-}
-```
-
-### World
-```lua
-world = {
-    width = MAP_WIDTH,
-    height = MAP_HEIGHT,
-    tiles = {},              -- flat array, tileIndex(x, y)
-    buildings = {},          -- array, swap-and-pop deletion (includes stockpiles/warehouses)
-
-    spread_cursor = 0,
-    growing_plant_data = {},  -- tileIndex → planted_tick
-}
-```
-
-### Time
-```lua
-time = {
-    speed = Speed.NORMAL,
-    is_paused = false,
-    accumulator = 0,
-    tick = 0,
-    game_minute = 0,
-    game_hour = 6,
-    game_day = 1,
-    game_season = 1,
-    game_year = 1,
-}
-```
-
----
-
-## Config Tables
-
-```lua
-NeedsConfig = {
-    child = {
-        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
-        energy     = { drain = 2 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
-        recreation = { drain = 8 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
-    },
-    [Tier.SERF]    = { satiation = { drain = 2 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 }, ... },
-    [Tier.FREEMAN] = { satiation = { drain = 3 * PER_HOUR, soft_threshold = 50, hard_threshold = 20, mood_threshold = 50, mood_penalty = -15 }, ... },
-    [Tier.GENTRY]  = { satiation = { drain = 4 * PER_HOUR, soft_threshold = 60, hard_threshold = 25, mood_threshold = 60, mood_penalty = -20 }, ... },
-}
-
-JobConfig = {
-    -- T1: Any unit, attribute only, no skill
-    hauler       = { job_tier = JobTier.T1, attribute = "strength" },
-    woodcutter   = { job_tier = JobTier.T1, attribute = "strength",     work_ticks = 8 * TICKS_PER_HOUR },
-    miner        = { job_tier = JobTier.T1, attribute = "strength",     work_ticks = 8 * TICKS_PER_HOUR },
-    stonecutter  = { job_tier = JobTier.T1, attribute = "strength",     work_ticks = 8 * TICKS_PER_HOUR },
-    miller       = { job_tier = JobTier.T1, attribute = "strength" },
-    farmer       = { job_tier = JobTier.T1, attribute = "wisdom",       work_ticks = 4 * TICKS_PER_HOUR },
-    fisher       = { job_tier = JobTier.T1, attribute = "wisdom",       work_ticks = 4 * TICKS_PER_HOUR },
-    gatherer     = { job_tier = JobTier.T1, attribute = "wisdom",       work_ticks = 4 * TICKS_PER_HOUR },
-
-    -- T2: Freeman+, attribute + skill
-    guard        = { job_tier = JobTier.T2, attribute = "strength",     skill = "melee_combat",  max_skill = 5 },
-    smith        = { job_tier = JobTier.T2, attribute = "dexterity",    skill = "smithing",      max_skill = 5 },
-    huntsman     = { job_tier = JobTier.T2, attribute = "dexterity",    skill = "hunting",       max_skill = 5 },
-    tailor       = { job_tier = JobTier.T2, attribute = "dexterity",    skill = "tailoring",     max_skill = 5 },
-    baker        = { job_tier = JobTier.T2, attribute = "intelligence", skill = "baking",        max_skill = 5 },
-    brewer       = { job_tier = JobTier.T2, attribute = "intelligence", skill = "brewing",       max_skill = 5 },
-    builder      = { job_tier = JobTier.T2, attribute = "intelligence", skill = "construction",  max_skill = 5 },
-    teacher      = { job_tier = JobTier.T2, attribute = "intelligence", skill = "scholarship",   max_skill = 5 },
-    herbalist    = { job_tier = JobTier.T2, attribute = "wisdom",       skill = "herbalism",     max_skill = 5 },
-    healer       = { job_tier = JobTier.T2, attribute = "wisdom",       skill = "medicine",      max_skill = 5 },
-    priest       = { job_tier = JobTier.T2, attribute = "wisdom",       skill = "priesthood",    max_skill = 5 },
-    barkeep      = { job_tier = JobTier.T2, attribute = "charisma",     skill = "barkeeping",    max_skill = 5 },
-    merchant     = { job_tier = JobTier.T2, attribute = "charisma",     skill = "trading",       max_skill = 5 },
-
-    -- T3: Gentry only, attribute + skill
-    knight       = { job_tier = JobTier.T3, attribute = "strength",     skill = "melee_combat",  max_skill = 10 },
-    armorer      = { job_tier = JobTier.T3, attribute = "dexterity",    skill = "smithing",      max_skill = 10 },
-    jeweler      = { job_tier = JobTier.T3, attribute = "dexterity",    skill = "jewelry",       max_skill = 10 },
-    architect    = { job_tier = JobTier.T3, attribute = "intelligence", skill = "construction",  max_skill = 10 },
-    scholar      = { job_tier = JobTier.T3, attribute = "intelligence", skill = "scholarship",   max_skill = 10 },
-    physician    = { job_tier = JobTier.T3, attribute = "wisdom",       skill = "medicine",      max_skill = 10 },
-    bishop       = { job_tier = JobTier.T3, attribute = "wisdom",       skill = "priesthood",    max_skill = 10 },
-    steward      = { job_tier = JobTier.T3, attribute = "charisma",     skill = "trading",       max_skill = 10 },
-    leader       = { job_tier = JobTier.T3, attribute = "charisma",     skill = "leadership",    max_skill = 10 },
-}
-
-ChildJobs = { "hauler", "farmer", "gatherer", "fisher" }
-
-InjuryConfig = {
-    bruised = { initial_damage = 10, recovery = 0.5 * PER_HOUR  },
-    wounded = { initial_damage = 30, recovery = 0.2 * PER_HOUR  },
-    maimed  = { initial_damage = 50, recovery = 0.05 * PER_HOUR },
-}
-
-IllnessConfig = {
-    cold        = { damage = 0.1 * PER_HOUR, recovery_chance = 0.08,  recovery = 0.4 * PER_HOUR  },
-    flu         = { damage = 0.2 * PER_HOUR, recovery_chance = 0.08,  recovery = 0.4 * PER_HOUR  },
-    the_flux    = { damage = 0.4 * PER_HOUR, recovery_chance = 0.10,  recovery = 0.3 * PER_HOUR  },
-    consumption = { damage = 0.1 * PER_HOUR, recovery_chance = 0.005, recovery = 0.2 * PER_HOUR  },
-    pox         = { damage = 0.3 * PER_HOUR, recovery_chance = 0.02,  recovery = 0.2 * PER_HOUR  },
-    pestilence  = { damage = 0.5 * PER_HOUR, recovery_chance = 0.01,  recovery = 0.15 * PER_HOUR },
-}
-
-MalnourishedConfig = { damage = 0.3 * PER_HOUR, recovery = 0.5 * PER_HOUR }
-
-ResourceConfig = {
-    logs       = { slot_size = 2 },
-    stone      = { slot_size = 2 },
-    iron       = { slot_size = 2 },
-    steel      = { slot_size = 2 },
-    gold       = { slot_size = 2 },
-    silver     = { slot_size = 2 },
-    gems       = { slot_size = 2 },
-    wheat      = { slot_size = 2 },
-    barley     = { slot_size = 2 },
-    flax       = { slot_size = 2 },
-    flour      = { slot_size = 2 },
-    bread      = { slot_size = 2 },
-    berries    = { slot_size = 2 },
-    meat       = { slot_size = 2 },
-    fish       = { slot_size = 2 },
-    beer       = { slot_size = 2 },
-    clothing   = { slot_size = 2 },
-    herbs      = { slot_size = 2 },
-    tools      = { slot_size = 2 },
-    weapons    = { slot_size = 2 },
-    armor      = { slot_size = 2 },
-    jewelry    = { slot_size = 2 },
-}
-
-ResourceSpawnConfig = {
-    timber      = { min_depth = 0.0  },
-    wildlife    = { min_depth = 0.0  },
-    herbs       = { min_depth = 0.01 },
-    berry_bush  = { min_depth = 0.0  },
-    artifacts   = { min_depth = 0.8  },
-}
-```
-
-See CONTEXT.md for full BuildingConfig with input/output inventory definitions and default_hauling_rules.
+**Rebuilt on load:** registry hash table (from all `world.*` entity arrays), per-unit visibility buffers, tile.is_explored/visible_count, `world.resource_counts` (via `resources.rebuildCounts()`).

@@ -123,7 +123,6 @@ function gamestate.playing:update(dt)
     if time.is_paused == false then
         local ticks = time:accumulate(dt)
         for _ = 1, ticks do
-            time:advance()
             simulation:onTick(time)
         end
     end
