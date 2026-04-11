@@ -1,5 +1,5 @@
 # Sovereign — CLAUDE.md
-*v1 · Technical reference for Claude Code and Claude.ai design sessions.*
+*v2 · Technical reference for Claude Code and Claude.ai design sessions.*
 
 > **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
 
@@ -8,6 +8,12 @@
 *Items added by Claude Code during implementation that need design review in the next Claude.ai chat session. Resolved items are removed during document updates at session end.*
 
 (none)
+
+## Implementation State
+
+*Updated by Claude Code as systems are implemented.*
+
+Nothing implemented. Starting from blank slate.
 
 ## Technical Routing Table
 
@@ -45,6 +51,7 @@ src/              -- Love2D root (launch with `love src`)
   ui/             -- renderer, camera, input, overlay
   events/         -- event system, Fey
 tests/            -- plain Lua tests, run outside Love2D (lua tests/run.lua)
+logs/             -- timestamped log files, gitignored
 ```
 
 All requires use paths relative to `src/` (e.g., `require("core.gamestate")`). Build a `.love` archive by zipping the contents of `src/`, not the repo root.
@@ -103,7 +110,7 @@ BuildingConfig uses `default_` prefixed fields for values that are copied to run
 
 CLAUDE CODE GUIDANCE
 
-Claude Code edits only the Pending Review section of CLAUDE.md. All other content in all project documents is off-limits without explicit instruction. If implementation reveals a discrepancy or design gap, add a brief note to Pending Review.
+Claude Code edits only the **Pending Review** and **Implementation State** sections of CLAUDE.md. All other content in all project documents is off-limits without explicit instruction. If implementation reveals a discrepancy or design gap, add a brief note to Pending Review.
 
 FLAT INDEX CONVENTION
 
@@ -132,6 +139,27 @@ function registry.createEntity(collection, entity)
     registry[entity.id] = entity
     return entity
 end
+```
+
+Module skeleton:
+
+```lua
+-- simulation/hauling.lua
+local world = require("core.world")
+local registry = require("core.registry")
+local log = require("core.log")
+
+local hauling = {}
+
+function hauling.postOrder(source_id, destination_id, resource_type)
+    -- ...
+end
+
+function hauling.sweepCompleted()
+    -- ...
+end
+
+return hauling
 ```
 
 OWNERSHIP MODEL
@@ -280,6 +308,8 @@ LOG SYSTEM (`core/log.lua`)
 
 Categories: `TIME`, `UNIT`, `JOB`, `WORLD`, `HEALTH`, `HAUL`, `SAVE`, `STATE`. Severity levels: OFF, ERROR, WARN, INFO, DEBUG. Ring buffer of last 200 messages for overlay. `log:info("UNIT", "Unit %d claimed job %d", unit.id, job.id)`.
 
+File output writes to `logs/` in the repo root using Lua's `io.open` — not `love.filesystem`, which writes to the save directory. Each session creates a timestamped file (e.g., `logs/2026-04-11_14-30-05.log`). On startup, if more than 20 log files exist, delete the oldest until 20 remain. Flush every log call. Overlay severity defaults to INFO, file severity defaults to DEBUG. `logs/` is in `.gitignore`.
+
 DEVELOPER OVERLAY (`ui/overlay.lua`)
 
 Toggled with F3. Stats bar: FPS, game_time, speed, unit/building/job counts. Tile inspector on hover: coordinates, terrain, plant_type/plant_growth, forest_depth, building_id, ground resources, claimed_by, visibility. Log tail: last ~10 messages.
@@ -315,6 +345,26 @@ Live in `tests/`. Run outside Love2D with `lua tests/run.lua` from the repo root
 - Resource count tally accuracy (running tallies match full recount)
 
 Tests are added per-system as that system is implemented — not batched per-phase.
+
+Test runner (`tests/run.lua`) prepends `src/` to `package.path`, requires each registered test file, and calls every function in its returned list. A test passes if it completes without error. Test files are manually registered in `run.lua`.
+
+```lua
+-- tests/test_carrying.lua
+local constants = require("config.constants")
+
+local function test_speedPenaltyAtMaxWeight()
+    local weight_ratio = 32 / constants.CARRY_WEIGHT_MAX
+    local slow_factor = constants.MAX_CARRY_SLOW * (1 - 0 / 20)
+    local move_speed = 1.0 * (1 - weight_ratio * slow_factor)
+    assert(move_speed == 0.5, "zero-strength unit at max weight should be half speed")
+end
+
+return {
+    test_speedPenaltyAtMaxWeight,
+}
+```
+
+Testable modules must not depend on Love2D at require time. If a test crashes on require, refactor the module to remove the engine dependency — don't mock Love2D. Headless soak testing (Love2D with `t.window = false`) is deferred until enough systems exist for meaningful integration tests.
 
 NOT TESTED
 
