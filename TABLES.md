@@ -1,5 +1,5 @@
 # Sovereign — TABLES.md
-*v1 · Reference data: game entity data structures, config tables, and production chains.*
+*v5 · Reference data: game entity data structures, config tables, and production chains.*
 
 ## Data Structures
 
@@ -45,8 +45,7 @@ unit = {
         smithing = 0, smelting = 0, tailoring = 0,
         baking = 0, brewing = 0, scholarship = 0, research = 0,
         medicine = 0, priesthood = 0, barkeeping = 0,
-        trading = 0, jewelry = 0,
-        -- combat = 0,  -- deferred pending combat system
+        trading = 0,
     },
     skill_progress = {
         -- Per-skill progress toward next level. Mirrors skills keys.
@@ -55,7 +54,7 @@ unit = {
         smithing = 0, smelting = 0, tailoring = 0,
         baking = 0, brewing = 0, scholarship = 0, research = 0,
         medicine = 0, priesthood = 0, barkeeping = 0,
-        trading = 0, jewelry = 0,
+        trading = 0,
     },
     needs = {
         satiation = 100, energy = 100, recreation = 100,
@@ -70,11 +69,8 @@ unit = {
     equipped = {
         tool = nil,             -- item entity id or nil
         clothing = nil,         -- item entity id or nil
-        jewelry = nil,          -- item entity id or nil
-        -- weapon = nil,        -- deferred pending combat system
-        -- armor = nil,         -- deferred pending combat system
     },
-    carrying = {},          -- flat array of entity ids (stacks and items mixed)
+    carrying = {},          -- flat array of entity ids (single resource type; see BEHAVIOR.md Carrying)
     claimed_tile = nil,     -- tileIndex of claimed resource tile, or nil
 
     job_id = nil,                   -- primary job (unskilled for serfs, specialty for freemen/clergy)
@@ -112,9 +108,9 @@ function unit:carryableAmount(type)
 end
 ```
 
-**Attributes** use three tables. `genetic_attributes` are derived from parents at birth and represent the growth target — capped at `genetic_attribute_max` (7), never change after birth. `natural_attributes` track current genetic growth, starting at `{1,1,1}` and growing toward `genetic_attributes` by adulthood. `acquired_attributes` are environmental bonuses, capped at `acquired_attribute_max` (3) per attribute. Effective attribute = `unit:getAttribute(key)` = `natural + acquired`. Max effective value is 10. Parent derivation formula and childhood growth curve are pending design (Phase 4).
+**Attributes** use three tables. `genetic_attributes` are derived from parents at birth and represent the growth target — capped at `genetic_attribute_max` (7), never change after birth. `natural_attributes` track current genetic growth, starting at `{1,1,1}` and growing toward `genetic_attributes` by adulthood. `acquired_attributes` are environmental bonuses, capped at `acquired_attribute_max` (3) per attribute. Effective attribute = `unit:getAttribute(key)` = `natural + acquired`. Max effective value is 10. Parent derivation formula and childhood growth curve are pending design (Phase 5).
 
-**Equipment:** Units wear individual items (tools, clothing, jewelry). Each equipped slot holds an item entity id referencing a first-class item entity in the registry. Units self-fetch equipment from the nearest stockpile or barn when missing a wanted item, preferring higher-quality variants (e.g., steel_tools over iron_tools). See BEHAVIOR.md Equipment Wants. Items degrade over time — tools drain durability per tick during work, clothing and jewelry drain per tick while awake. When durability reaches 0, the item is destroyed and removed from the registry (resource counts updated via `equipped` category). The unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning.
+**Equipment:** Units wear individual items (tools, clothing). Each equipped slot holds an item entity id referencing a first-class item entity in the registry. Units self-fetch equipment from the nearest stockpile or barn when missing a wanted item, preferring higher-quality variants (e.g., steel_tools over iron_tools). See BEHAVIOR.md Equipment Wants. Items degrade over time — tools drain durability per tick during work, clothing drains per tick while awake. When durability reaches 0, the item is destroyed and removed from the registry (resource counts updated via `equipped` category). The unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning. Additional equipped slots (jewelry, weapon, armor) arrive in later phases.
 
 MEMORY (DEAD UNIT)
 
@@ -142,6 +138,7 @@ tile = {
     visible_count = 0,
     claimed_by = nil,        -- unit_id claiming resource for gathering
     target_of_unit = nil,    -- unit_id whose target_tile is this tile, or nil
+    unit_ids = {},           -- unit ids currently on this tile (maintained on move, spawn, death)
 }
 ```
 
@@ -163,7 +160,6 @@ job = {
     resource = nil,
     source_id = nil,         -- building id, ground pile id, or nil (unit is carrying)
     destination_id = nil,    -- building id
-    hauling_order_id = nil,  -- hauling order that generated this job, or nil
     is_private = false,      -- true for self-posted jobs (self-fetch, self-deposit, merchant delivery)
 }
 ```
@@ -171,21 +167,6 @@ job = {
 Job types are keys from JobTypeConfig (woodcutter, baker, farmer, etc.) or `"haul"` for hauling jobs. Public haul jobs are scored by distance to source and job age. Private haul jobs (`is_private = true`) are posted and claimed atomically by the same unit — they never appear in the job queue for other units. They exist for reservation tracking and cleanup.
 
 Buildings post jobs when they have work available and `#posted_job_ids < worker_limit`. All building-posted jobs (operational, build, construction haul) are tracked in `building.posted_job_ids`. The job's `target_id` references the building. When a worker claims the job, they path to the building and work. When the job completes or the worker leaves, the building may post a new job.
-
-HAULING ORDER
-
-```lua
-hauling_order = {
-    id = 0,
-    resource = "flour",
-    source_id = nil,              -- storage building id, or nil for "any storage"
-    destination_id = 7,           -- storage building id, or nil for "any storage"
-    source_threshold = nil,       -- only fire when source stock exceeds this (nil = always)
-    destination_threshold = 10,   -- only fire when destination stock is below this (nil = always)
-}
-```
-
-Player-configured, storage-to-storage only. See ECONOMY.md Hauling Order System for full details.
 
 PRODUCTION ORDER
 
@@ -219,7 +200,7 @@ building = {
     id = 0, type = "cottage",
     category = "housing",    -- "storage" | "housing" | "farming" | "gathering" | "extraction" | "processing" | "service"
     x = 0, y = 0, width = 0, height = 0,
-    orientation = "S",       -- "N" | "S" | "E" | "W" — door facing direction (nil for player-sized buildings)
+    orientation = "S",       -- "N" | "S" | "E" | "W" — door facing direction (nil for player-sized and solid buildings)
     is_built = false,
     is_deleted = false,      -- flagged for deletion, swept at end of tick
 
@@ -227,13 +208,13 @@ building = {
     construction = {
         bins = {},           -- array of bins (container_type = "bin"): { type, capacity, contents, reserved_in, reserved_out }
                              -- one bin per build_cost type, capacity = exact required amount
+        build_ticks = 0,     -- total ticks to complete (computed at placement from BuildingConfig)
         progress = 0,        -- ticks of work completed
     },
 
     -- Job tracking (all buildings)
     posted_job_ids = {},     -- every job this building posted (operational, build, construction haul)
                              -- used for staffing check (#posted_job_ids < worker_limit) and deletion cleanup
-    hauling_order_ids = {},  -- hauling orders referencing this building as source or destination
 
     -- Workforce (non-housing buildings only)
     worker_limit = 0,        -- player-adjustable; capped at max_workers from BuildingConfig
@@ -275,7 +256,7 @@ building = {
 }
 ```
 
-`housing.bins` is built dynamically from HousingBinConfig at construction time. Adding a food type to HousingBinConfig automatically makes it available in all housing buildings. Equipment (tools, clothing, jewelry) is not stored in housing — units self-fetch from storage buildings. See BEHAVIOR.md Equipment Wants.
+`housing.bins` is built dynamically from HousingBinConfig at construction time. Adding a food type to HousingBinConfig automatically makes it available in all housing buildings. Equipment (tools, clothing) is not stored in housing — units self-fetch from storage buildings. See BEHAVIOR.md Equipment Wants.
 
 `production.input_bins` is built dynamically at construction from the building's recipes — collect all unique input resource types across all recipes, create one bin per type with capacity from BuildingConfig.
 
@@ -297,7 +278,7 @@ building = {
 | processing | `production` |
 | service | building-specific fields (`max_students`, `market`, etc.) |
 
-Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `is_built`, `is_deleted`, `posted_job_ids`, `hauling_order_ids`. Under construction: `construction` sub-table. Non-housing buildings additionally have `worker_limit`. Player-sized buildings have no `orientation`.
+Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `is_built`, `is_deleted`, `posted_job_ids`. Under construction: `construction` sub-table. Non-housing buildings additionally have `worker_limit`. Player-sized buildings and solid buildings have no `orientation`.
 
 **Construction:** Building placement creates a building entity with `is_built = false` and populates a `construction` sub-table. See BEHAVIOR.md Construction Work Cycle for the full behavioral sequence.
 
@@ -311,11 +292,11 @@ Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `he
 
 **Extraction:** No depletion. See BEHAVIOR.md Gathering Work Cycle.
 
-**Stockpile filters:** Player-configurable. See ECONOMY.md Containers for filter semantics and per-tile capacity.
+**Stockpile filters:** Player-configurable per-type filters with three modes: reject, accept, and get. See ECONOMY.md Storage Filter System for filter semantics, pull mechanics, and per-tile capacity.
 
-**Warehouse constraints:** Warehouses use the same filter system as stockpiles but only accept stackable resources (enforced by `is_stackable_only` in BuildingConfig). Total weight capacity from BuildingConfig.
+**Warehouse constraints:** Warehouses use the same filter system as stockpiles but only accept stackable resources (enforced by `is_stackable_only` in BuildingConfig — filter table is populated with stackable types only). Total weight capacity from BuildingConfig.
 
-**Barn constraints:** Barns only accept non-stackable items (enforced by `is_items_only` in BuildingConfig). No tile representation — the player interacts via a panel UI showing item icons. Capacity is a flat item count (`item_capacity`), not tile-based.
+**Barn constraints:** Barns only accept non-stackable items (enforced by `is_items_only` in BuildingConfig — filter table is populated with item types only). No tile representation — the player interacts via a panel UI showing item icons. Capacity is a flat item count (`item_capacity`), not tile-based.
 
 WORLD
 
@@ -332,7 +313,6 @@ world = {
     jobs = {},
     stacks = {},
     items = {},
-    hauling_orders = {},
     ground_piles = {},
 
     -- Plant system
@@ -450,7 +430,7 @@ MerchantConfig = {
 
 -- Housing bin definitions — built dynamically on housing construction.
 -- One bin per entry. Food bins use weight-based capacity (stackable).
--- Equipment (tools, clothing, jewelry) is not stored in housing — units self-fetch from storage.
+-- Equipment (tools, clothing) is not stored in housing — units self-fetch from storage.
 HousingBinConfig = {
     { type = "bread",       capacity = 128 },
     { type = "berries",     capacity = 128 },
@@ -462,9 +442,9 @@ HousingBinConfig = {
 --
 -- work_source determines where work_ticks comes from:
 --   "plant"  — PlantConfig[plant_type].harvest_ticks (woodcutter, gatherer, herbalist)
---   "recipe" — RecipeConfig[recipe].work_ticks (miller, baker, brewer, tailor, smith, smelter, jeweler)
+--   "recipe" — RecipeConfig[recipe].work_ticks (miller, baker, brewer, tailor, smith, smelter)
 --   "crop"   — CropConfig[crop].plant_ticks or .harvest_ticks depending on current work (farmer)
---   "job"    — work_ticks on this JobTypeConfig entry (iron_miner, gold_miner, stonecutter, fisher)
+--   "job"    — work_ticks on this JobTypeConfig entry (iron_miner, stonecutter, fisher)
 --   "target" — target building's build_ticks (builder)
 --   nil      — no work_ticks, ongoing service (hauler, priest, bishop, teacher, barkeep, merchant, physician)
 JobTypeConfig = {
@@ -472,7 +452,6 @@ JobTypeConfig = {
     hauler       = { is_specialty = false, attribute = "strength" },
     woodcutter   = { is_specialty = false, attribute = "strength",     work_source = "plant" },
     iron_miner   = { is_specialty = false, attribute = "strength",     work_source = "job", work_ticks = 2 * TICKS_PER_HOUR },
-    gold_miner   = { is_specialty = false, attribute = "strength",     work_source = "job", work_ticks = 4 * TICKS_PER_HOUR },
     stonecutter  = { is_specialty = false, attribute = "strength",     work_source = "job", work_ticks = 2 * TICKS_PER_HOUR },
     miller       = { is_specialty = false, attribute = "strength",     work_source = "recipe" },
     builder      = { is_specialty = false, attribute = "intelligence", work_source = "target" },
@@ -488,7 +467,6 @@ JobTypeConfig = {
     baker        = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "baking",       max_skill = 10, work_source = "recipe" },
     brewer       = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "brewing",      max_skill = 10, work_source = "recipe" },
     teacher      = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "scholarship",  max_skill = 10 },
-    jeweler      = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "jewelry",      max_skill = 10, work_source = "recipe" },
     scholar      = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "research",     max_skill = 10 },
     physician    = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "medicine",     max_skill = 10 },
     barkeep      = { is_specialty = true, class = "freeman", attribute = "charisma",     skill = "barkeeping",   max_skill = 10 },
@@ -497,26 +475,18 @@ JobTypeConfig = {
     -- Specialty — clergy
     priest       = { is_specialty = true, class = "clergy",  attribute = "charisma",     skill = "priesthood",   max_skill = 10 },
     bishop       = { is_specialty = true, class = "clergy",  attribute = "charisma",     skill = "priesthood",   max_skill = 10 },
-
-    -- Specialty — gentry
-    -- knight    = { is_specialty = true, class = "gentry",  attribute = "strength",     skill = "combat",       max_skill = 10 },  -- deferred pending combat system
 }
 
 SerfChildJobs = { "hauler", "farmer", "gatherer", "fisher" }
 
 RecipeConfig = {
-    flour          = { input = { wheat = 1 },   output = { flour = 1 },          work_ticks = 30 * TICKS_PER_MINUTE },
-    bread          = { input = { flour = 1 },   output = { bread = 1 },          work_ticks = 1 * TICKS_PER_HOUR },
-    beer           = { input = { barley = 1 },  output = { beer = 1 },           work_ticks = 1 * TICKS_PER_HOUR },
-    clothing       = { input = { flax = 2 },    output = { clothing = 1 },       work_ticks = 2 * TICKS_PER_HOUR },
-    steel          = { input = { iron = 2 },    output = { steel = 1 },          work_ticks = 2 * TICKS_PER_HOUR },
-    iron_tools     = { input = { iron = 2 },    output = { iron_tools = 1 },     work_ticks = 2 * TICKS_PER_HOUR },
-    iron_weapons   = { input = { iron = 4 },    output = { iron_weapons = 1 },   work_ticks = 4 * TICKS_PER_HOUR },
-    iron_armor     = { input = { iron = 6 },    output = { iron_armor = 1 },     work_ticks = 6 * TICKS_PER_HOUR },
-    steel_tools    = { input = { steel = 2 },   output = { steel_tools = 1 },    work_ticks = 2 * TICKS_PER_HOUR },
-    steel_weapons  = { input = { steel = 4 },   output = { steel_weapons = 1 },  work_ticks = 4 * TICKS_PER_HOUR },
-    steel_armor    = { input = { steel = 6 },   output = { steel_armor = 1 },    work_ticks = 6 * TICKS_PER_HOUR },
-    jewelry        = { input = { gold = 2 },    output = { jewelry = 1 },        work_ticks = 4 * TICKS_PER_HOUR },
+    flour           = { input = { wheat = 1 },              output = { flour = 1 },           work_ticks = 30 * TICKS_PER_MINUTE },
+    bread           = { input = { flour = 1 },              output = { bread = 1 },           work_ticks = 1 * TICKS_PER_HOUR },
+    beer            = { input = { barley = 1 },             output = { beer = 1 },            work_ticks = 1 * TICKS_PER_HOUR },
+    plain_clothing  = { input = { flax = 2 },               output = { plain_clothing = 1 },  work_ticks = 2 * TICKS_PER_HOUR },
+    steel           = { input = { iron = 2, firewood = 4 }, output = { steel = 1 },           work_ticks = 2 * TICKS_PER_HOUR },
+    iron_tools      = { input = { iron = 2 },               output = { iron_tools = 1 },      work_ticks = 2 * TICKS_PER_HOUR },
+    steel_tools     = { input = { steel = 2 },              output = { steel_tools = 1 },     work_ticks = 2 * TICKS_PER_HOUR },
 }
 
 GrowthConfig = {
@@ -549,8 +519,6 @@ MoodModifierConfig = {
     food_variety_bonus    =   5,        -- per food type beyond the first eaten within FOOD_VARIETY_WINDOW
     has_clothing          =   5,
     no_clothing           = -15,
-    has_jewelry           =  10,        -- Gentry only
-    no_jewelry            = -10,        -- Gentry only
     low_health            = -10,        -- applied when health < 50
 
     -- Stored modifiers (event-driven, with ticks_remaining)
@@ -596,7 +564,9 @@ ResourceConfig = {
     -- Metals (stackable)
     iron            = { weight = 4, is_stackable = true },
     steel           = { weight = 4, is_stackable = true },
-    gold            = { weight = 4, is_stackable = true },
+
+    -- Fuel (stackable)
+    firewood        = { weight = 4, is_stackable = true },
 
     -- Crops (stackable)
     wheat           = { weight = 1, is_stackable = true },
@@ -616,16 +586,9 @@ ResourceConfig = {
     herbs           = { weight = 1, is_stackable = true },
 
     -- Equipment (items — non-stackable, with durability)
-    clothing        = { weight = 1, is_stackable = false, max_durability = 100 },
-    jewelry         = { weight = 1, is_stackable = false, max_durability = 100 },
+    plain_clothing  = { weight = 1, is_stackable = false, max_durability = 100 },
     iron_tools      = { weight = 2, is_stackable = false, max_durability = 100, tool_bonus = 3 },
     steel_tools     = { weight = 2, is_stackable = false, max_durability = 200, tool_bonus = 5 },
-
-    -- Military (items — non-stackable, with durability)
-    iron_weapons    = { weight = 3, is_stackable = false, max_durability = 100 },
-    steel_weapons   = { weight = 3, is_stackable = false, max_durability = 200 },
-    iron_armor      = { weight = 4, is_stackable = false, max_durability = 100 },
-    steel_armor     = { weight = 4, is_stackable = false, max_durability = 200 },
 }
 
 PlantConfig = {
@@ -643,7 +606,7 @@ PlantConfig = {
         seedling_ticks = math.floor(0.5 * TICKS_PER_SEASON),
         young_ticks = math.floor(0.5 * TICKS_PER_SEASON),
         harvest_ticks = 4 * TICKS_PER_HOUR,
-        harvest_yield = 0,      -- TBD: herbs have no consumer until Phase 3
+        harvest_yield = 0,      -- TBD: herbs have no consumer until Phase 4
         spread_chance = 0.01,
         spread_radius = 4,
     },
@@ -679,16 +642,17 @@ PRODUCTION CHAINS
 | Fish | Fishing Dock (fisher) → fish |
 | Herbs (pending) | Herbalist's Hut (herbalist) → herbs → Apothecary (physician) → physician travels to patient |
 | Beer | Farm (farmer) → barley → Brewery (brewer) → beer |
-| Clothing | Farm (farmer) → flax → Tailor's Shop (tailor) → clothing |
-| Iron items | Iron Mine (iron_miner) → iron → Smithy (smith) → tools/weapons/armor |
-| Steel items | Iron Mine (iron_miner) → iron → Bloomery (smelter) → steel → Smithy (smith) → tools/weapons/armor |
-| Jewelry | Gold Mine (gold_miner) → gold → Jeweler's Workshop (jeweler) → jewelry |
+| Plain clothing | Farm (farmer) → flax → Tailor's Shop (tailor) → plain clothing |
+| Iron tools | Iron Mine (iron_miner) → iron → Smithy (smith) → iron tools |
+| Steel | Iron Mine (iron_miner) → iron + Firewood → Bloomery (smelter) → steel |
+| Steel tools | Steel → Smithy (smith) → steel tools |
+| Firewood | Woodcutter's Camp (woodcutter) → wood → Chopping Block (TBD) → firewood |
 | Stone | Quarry (stonecutter) → stone |
 | Wood | Woodcutter's Camp (woodcutter) → wood |
 
 BUILDING CONFIG
 
-Building sizes and tile maps are preliminary — exact layouts, tile maps, and interior positions are pending authoring. Sizes may increase to accommodate interiors (especially community buildings: tavern, church, school). The `tile_map` and `layout` fields shown below are examples; final values will be authored when the building layout system is implemented.
+Phase 1 building layouts (tile maps, layout positions, dimensions) are authored. Remaining buildings (Phase 2+) have placeholder sizes and empty tile maps — exact layouts will be authored as they come online in later phases. Sizes may increase to accommodate interiors (especially community buildings: tavern).
 
 Input bin and storage capacity values are in weight units. Capacity per resource type = `floor(capacity / ResourceConfig[type].weight)`.
 
@@ -727,12 +691,20 @@ BuildingConfig = {
     -- Housing (food stored in typed bins from HousingBinConfig)
     cottage = {
         category = "housing",
-        width = 3, height = 3,    -- TBD: may increase for interior space
+        width = 5, height = 4,
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 6 * TICKS_PER_HOUR,
-        tile_map = {},   -- TBD
+        tile_map = {
+            "W", "W", "W", "W", "W",
+            "W", "F", "F", "F", "W",
+            "W", "F", "F", "F", "W",
+            "W", "W", "D", "W", "W",
+        },
         layout = {
-            beds = {},   -- TBD: positions on F tiles
+            beds = {
+                { x = 1, y = 1 }, { x = 3, y = 1 },
+                { x = 1, y = 2 }, { x = 3, y = 2 },
+            },
         },
     },
     house = {
@@ -769,48 +741,70 @@ BuildingConfig = {
     },
 
     -- Hub gathering (workers cycle: hub → resource → hub)
+    -- Solid buildings — workers never enter, path adjacent-to-rect. No door, no clearing.
+    -- Job posting gated on unclaimed valid target count (see BEHAVIOR.md Gathering Work Cycle).
     woodcutters_camp = {
         category = "gathering",
+        is_solid = true,
         width = 2, height = 2,
         build_cost = { wood = 20 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
         job_type = "woodcutter",
-        tile_map = {},   -- TBD
-        layout = {},     -- TBD
+        tile_map = {
+            "W", "W",
+            "W", "W",
+        },
+        layout = {},
     },
     gatherers_hut = {
         category = "gathering",
+        is_solid = true,
         width = 2, height = 2,
         build_cost = { wood = 15 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
         job_type = "gatherer",
-        tile_map = {},   -- TBD
-        layout = {},     -- TBD
+        tile_map = {
+            "W", "W",
+            "W", "W",
+        },
+        layout = {},
     },
     herbalists_hut = {
         category = "gathering",
+        is_solid = true,
         width = 2, height = 2,
         build_cost = { wood = 15 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
         job_type = "herbalist",
-        tile_map = {},   -- TBD
-        layout = {},     -- TBD
+        tile_map = {
+            "W", "W",
+            "W", "W",
+        },
+        layout = {},
     },
 
     -- Stationary extraction (worker stays at building, output accumulates, no depletion)
     fishing_dock = {
         category = "extraction",
-        width = 2, height = 2,
+        width = 3, height = 3,
         build_cost = { wood = 20 },
         build_ticks = 6 * TICKS_PER_HOUR,
         placement = "water",
         max_workers = 4,
         job_type = "fisher",
-        tile_map = {},   -- TBD
-        layout = {},     -- TBD
+        tile_map = {
+            "W", "F", "W",
+            "W", "F", "W",
+            "W", "D", "W",
+        },
+        layout = {
+            workstation = { x = 1, y = 0 },
+        },
+        -- Back row on water, front row on grass/dirt. 2-deep water clearing behind back row.
+        -- Back-row perimeter F tile allowed per perimeter F exception (see WORLD.md Dead-End Rule).
     },
     iron_mine = {
         category = "extraction",
@@ -820,17 +814,6 @@ BuildingConfig = {
         placement = "rock",
         max_workers = 4,
         job_type = "iron_miner",
-        tile_map = {},   -- TBD
-        layout = {},     -- TBD
-    },
-    gold_mine = {
-        category = "extraction",
-        width = 3, height = 3,
-        build_cost = { wood = 40, stone = 30 },
-        build_ticks = 10 * TICKS_PER_HOUR,
-        placement = "rock",
-        max_workers = 4,
-        job_type = "gold_miner",
         tile_map = {},   -- TBD
         layout = {},     -- TBD
     },
@@ -905,9 +888,9 @@ BuildingConfig = {
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
         job_type = "tailor",
-        recipes = { "clothing" },
+        recipes = { "plain_clothing" },
         default_production_orders = {
-            { recipe = "clothing", is_standing = true, amount = -1 },
+            { recipe = "plain_clothing", is_standing = true, amount = -1 },
         },
         input_bins = {
             { type = "flax", capacity = 128 },
@@ -922,7 +905,7 @@ BuildingConfig = {
         build_ticks = 12 * TICKS_PER_HOUR,
         max_workers = 1,
         job_type = "smith",
-        recipes = { "iron_tools", "iron_weapons", "iron_armor", "steel_tools", "steel_weapons", "steel_armor" },
+        recipes = { "iron_tools", "steel_tools" },
         default_production_orders = {
             { recipe = "iron_tools", is_standing = true, amount = -1 },
         },
@@ -946,50 +929,13 @@ BuildingConfig = {
         },
         input_bins = {
             { type = "iron", capacity = 128 },
-        },
-        tile_map = {},   -- TBD
-        layout = {},     -- TBD
-    },
-    jewelers_workshop = {
-        category = "processing",
-        width = 3, height = 3,
-        build_cost = { wood = 40, stone = 20 },
-        build_ticks = 8 * TICKS_PER_HOUR,
-        max_workers = 1,
-        job_type = "jeweler",
-        recipes = { "jewelry" },
-        default_production_orders = {
-            { recipe = "jewelry", is_standing = true, amount = -1 },
-        },
-        input_bins = {
-            { type = "gold", capacity = 128 },
+            { type = "firewood", capacity = 128 },
         },
         tile_map = {},   -- TBD
         layout = {},     -- TBD
     },
 
     -- Service (community buildings — sizes TBD, will be larger to support interiors with seats/pews)
-    church = {
-        category = "service",
-        width = 5, height = 4,    -- TBD: will likely grow for pew seating
-        build_cost = { wood = 80, stone = 60 },
-        build_ticks = 16 * TICKS_PER_HOUR,
-        max_workers = 1,
-        job_type = "priest",
-        tile_map = {},   -- TBD
-        layout = {},     -- TBD: pulpit + pew seats
-    },
-    school = {
-        category = "service",
-        width = 3, height = 3,    -- TBD: will likely grow for student seating
-        build_cost = { wood = 40, stone = 20 },
-        build_ticks = 8 * TICKS_PER_HOUR,
-        max_workers = 1,
-        max_students = 20,
-        job_type = "teacher",
-        tile_map = {},   -- TBD
-        layout = {},     -- TBD: teacher desk + student seats
-    },
     market = {
         category = "service",
         width = 3, height = 3,
@@ -1010,7 +956,7 @@ BuildingConfig = {
         job_type = "barkeep",
         tile_map = {},   -- TBD
         layout = {},     -- TBD: barkeep station + patron seats
-        -- input/consumption mechanics pending (Phase 3)
+        -- input/consumption mechanics pending (Phase 4)
     },
     apothecary = {
         category = "service",

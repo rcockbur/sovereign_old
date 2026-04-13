@@ -1,5 +1,5 @@
 # Sovereign — CLAUDE.md
-*v2 · Technical reference for Claude Code and Claude.ai design sessions.*
+*v7 · Technical reference for Claude Code and Claude.ai design sessions.*
 
 > **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
 
@@ -21,13 +21,13 @@ Detailed specs live in separate files. Read the relevant file before implementin
 
 | File | Contents |
 |---|---|
-| **BEHAVIOR.md** | Tick order, hash offset, per-unit update loops (per-tick and per-hash), activity types and handlers, need interrupts (soft/hard, availability gating), sleep (time-of-day thresholds, wake check, sleep destination, collapse), eating behavior, home food self-fetch, carrying (rules, single-type invariant, weight cap), offloading, self-fetch and self-deposit (behavioral patterns), work cycles (designation, gathering, extraction, processing, farming), production order evaluation, work in progress, equipment want behavior, drafting, unit death cleanup, building deletion cleanup, classes and specialties (promotion, children, job filtering, skill growth). |
-| **ECONOMY.md** | Resource entities (stacks, items), containers (bin, tile inventory, stack inventory, item inventory, ground pile), reservation system (mechanism and lifecycle), resources module API, resource counts system, frost and farming (thaw/frost system, per-tile crop state, farm controls, farm job posting, harvest yield), ground piles (entity structure, ground drop search algorithm), hauling order system, merchant delivery system. |
+| **BEHAVIOR.md** | Tick order, hash offset, per-unit update loops (per-tick and per-hash), activity types and handlers, need interrupts (soft/hard, availability gating), sleep (time-of-day thresholds, wake check, sleep destination, collapse), home assignment, eating behavior, home food self-fetch, carrying (rules, single-type invariant, weight cap), offloading, self-fetch and self-deposit (behavioral patterns), work cycles (designation, gathering, extraction, processing, farming), production order evaluation, work in progress, equipment want behavior, drafting, unit death cleanup, building deletion cleanup, classes and specialties (promotion, children, job filtering, skill growth). |
+| **ECONOMY.md** | Resource entities (stacks, items), containers (bin, tile inventory, stack inventory, item inventory, ground pile), reservation system (mechanism and lifecycle), resources module API, resource counts system, frost and farming (thaw/frost system, per-tile crop state, farm controls, farm job posting, harvest yield), ground piles (entity structure, ground drop search algorithm), storage filter system (filter modes, pull mechanics, source resolution, cycle detection), merchant delivery system. |
 | **WORLD.md** | Map (dimensions, terrain, forest coverage, forest depth), map generation (noise setup, full pipeline, tuning), pathfinding (A*, tile costs, movement model, movement speed, collision, failure), building layout (tile types, tile maps, clearing, orientation, placement validation, construction state, buildings without tile maps, pathfinding integration), plant system (growth stages, spread, cursor scan), visibility (deferred). |
-| **TABLES.md** | Game entity data structures (unit, memory, tile, job, hauling order, production order, work in progress, building, world). All config tables (NeedsConfig, SleepConfig, MerchantConfig, HousingBinConfig, JobTypeConfig, SerfChildJobs, RecipeConfig, GrowthConfig, MoodThresholdConfig, MoodModifierConfig, InjuryConfig, IllnessConfig, MalnourishedConfig, ResourceConfig, PlantConfig, CropConfig, BuildingConfig). Production chains. |
-| **UI.md** | Camera, input handling, layout (right panel, left panel, bottom bar), selection mechanics, panel contents and variations, command panel, management overlays, notification display. |
+| **TABLES.md** | Game entity data structures (unit, memory, tile, job, production order, work in progress, building, world). All config tables (NeedsConfig, SleepConfig, MerchantConfig, HousingBinConfig, JobTypeConfig, SerfChildJobs, RecipeConfig, GrowthConfig, MoodThresholdConfig, MoodModifierConfig, InjuryConfig, IllnessConfig, MalnourishedConfig, ResourceConfig, PlantConfig, CropConfig, BuildingConfig). Production chains. |
+| **UI.md** | UI architecture (module structure, input routing, draw order, interaction modes), camera, input handling, layout (right panel, left panel, bottom bar), selection mechanics, panel contents and variations, command bar, management overlays, notification display. |
 
-**BEHAVIOR.md vs ECONOMY.md boundary:** BEHAVIOR.md owns what units do — all step-by-step behavioral sequences including work cycles, self-fetch/deposit flows, carrying rules, equipment want behavior, and interrupt handling. ECONOMY.md owns what the resource system provides — entities, containers, the resources module API, reservations as a mechanism, and autonomous systems like the merchant and hauling orders. When a unit calls a resources module function, the call sequence lives in BEHAVIOR.md; the function's contract and implementation details live in ECONOMY.md. A task involving unit behavior should only need BEHAVIOR.md (plus TABLES.md). ECONOMY.md is loaded when working on resource infrastructure itself.
+**BEHAVIOR.md vs ECONOMY.md boundary:** BEHAVIOR.md owns what units do — all step-by-step behavioral sequences including work cycles, self-fetch/deposit flows, carrying rules, equipment want behavior, and interrupt handling. ECONOMY.md owns what the resource system provides — entities, containers, the resources module API, reservations as a mechanism, and autonomous systems like the merchant and storage filter pulls. When a unit calls a resources module function, the call sequence lives in BEHAVIOR.md; the function's contract and implementation details live in ECONOMY.md. A task involving unit behavior should only need BEHAVIOR.md (plus TABLES.md). ECONOMY.md is loaded when working on resource infrastructure itself.
 
 **Simulation files vs UI file:** The domain files split into **simulation files** (BEHAVIOR.md, ECONOMY.md, WORLD.md, TABLES.md) and the **UI file** (UI.md). The simulation files own everything that would exist in a headless run — rules, state, behavior, formulas. UI.md owns how the player sees and interacts with the simulation — panels, input handling, camera, layout, interaction flows. None of it exists in a headless run.
 
@@ -45,16 +45,21 @@ Claude Code should read the relevant file(s) before starting implementation. Mos
 ```
 src/              -- Love2D root (launch with `love src`)
   main.lua
-  core/           -- gamestate, time, registry, world, simulation, log, save
-  simulation/     -- unit.lua, jobs, needs, mood, health, hauling, building, dynasty, resources
-  config/         -- all config tables, constants.lua
-  ui/             -- renderer, camera, input, overlay
+  app/            -- gamestate machine + state files (application lifecycle)
+    gamestate.lua
+    loading.lua
+    main_menu.lua
+    playing.lua
+  core/           -- time, registry, world, simulation, log, save
+  simulation/     -- unit.lua, jobs, needs, mood, health, building, dynasty, resources, filters
+  config/         -- all config tables, constants.lua, strings.lua
+  ui/             -- ui.lua hub, right_panel, left_panel, action_bar, command_bar, overlays, camera, renderer, dev_overlay
   events/         -- event system, Fey
 tests/            -- plain Lua tests, run outside Love2D (lua tests/run.lua)
 logs/             -- timestamped log files, gitignored
 ```
 
-All requires use paths relative to `src/` (e.g., `require("core.gamestate")`). Build a `.love` archive by zipping the contents of `src/`, not the repo root.
+All requires use paths relative to `src/` (e.g., `require("core.world")`). Build a `.love` archive by zipping the contents of `src/`, not the repo root.
 
 ## Entry Point
 
@@ -63,15 +68,35 @@ All requires use paths relative to `src/` (e.g., `require("core.gamestate")`). B
 if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then
     require("lldebugger").start()
 end
+
+require("config.constants")
+
+local gamestate = require("app.gamestate")
+local loading = require("app.loading")
+
+function love.load()
+    gamestate:switch(loading)
+end
+
+function love.update(dt) gamestate:update(dt) end
+function love.draw() gamestate:draw() end
+function love.keypressed(key) gamestate:keypressed(key) end
+function love.mousepressed(x, y, button) gamestate:mousepressed(x, y, button) end
 ```
 
-Love2D callbacks delegate to `core/gamestate.lua`. Only the `playing` state runs the simulation. The `src/` directory is the Love2D root — launch with `love src` from the repo root.
+`main.lua` is pure wiring. Constants load first as globals (see Constants section). Love2D callbacks delegate to `app/gamestate.lua`, which forwards to the current state's hooks. The `src/` directory is the Love2D root — launch with `love src` from the repo root.
 
 ## Game State Machine
 
-Stack-based in `core/gamestate.lua`. States: `loading`, `main_menu`, `playing`. Each state is a table with hooks: `enter`, `exit`, `update(dt)`, `draw`, `keypressed`, `mousepressed`. `gamestate:switch(state)` for transitions. `gamestate:push`/`pop` reserved for future modal overlays.
+Stack-based in `app/gamestate.lua`. Gamestate owns only the stack mechanism — `switch`, `push`, `pop`, and callback forwarding. Each state is a separate file returning a table with hooks: `enter`, `exit`, `update(dt)`, `draw`, `keypressed`, `mousepressed`. `gamestate:switch(state)` for transitions. `gamestate:push`/`pop` reserved for future modal overlays.
 
-Quit-to-menu from `playing` tears down the current game (clear `world` and `registry`) and returns to `main_menu`. Quit from `main_menu` calls `love.event.quit()`.
+**State files:**
+
+- `app/loading.lua` — `enter()` runs config validation (see Config Validation below). Switches to `main_menu` on success. Transient state — never runs `update`.
+- `app/main_menu.lua` — draws menu, handles input. New game switches to `playing`. Quit calls `love.event.quit()`.
+- `app/playing.lua` — `enter()` initializes the game: map generation, spawn starting units and buildings, `resources.rebuildCounts()`. `update()` runs `simulation.onTick()`. Only `playing` runs the simulation.
+
+Quit-to-menu from `playing` tears down the current game (clear `world` and `registry`) and returns to `main_menu`.
 
 ## Conventions
 
@@ -96,13 +121,13 @@ BIDIRECTIONAL REFERENCES
 
 Prefer bidirectional references for entity relationships. Both sides should be maintained on create and destroy.
 
-Examples: `unit.home_id` ↔ `building.housing.member_ids`, `unit.job_id` ↔ `job.claimed_by`, `unit.claimed_tile` ↔ `tile.claimed_by`, `unit.target_tile` ↔ `tile.target_of_unit`, `unit.bed_index` ↔ `bed.unit_id`, `unit.friend_ids` ↔ counterpart's `friend_ids`, `building.posted_job_ids` ↔ `job.target_id`, `building.hauling_order_ids` ↔ `hauling_order.source_id`/`destination_id`.
+Examples: `unit.home_id` ↔ `building.housing.member_ids`, `unit.job_id` ↔ `job.claimed_by`, `unit.claimed_tile` ↔ `tile.claimed_by`, `unit.target_tile` ↔ `tile.target_of_unit`, `unit.bed_index` ↔ `bed.unit_id`, `unit.friend_ids` ↔ counterpart's `friend_ids`, `building.posted_job_ids` ↔ `job.target_id`.
 
-Rationale: simplifies cleanup (if a building is deleted, its `posted_job_ids` immediately identifies affected jobs and their claimants, its `hauling_order_ids` identifies orders to remove) and makes traversal straightforward in both directions. Bidirectional refs are appropriate for stable entity relationships — not for transient operational state like private haul jobs (those are found via the unit walk during deletion).
+Rationale: simplifies cleanup (if a building is deleted, its `posted_job_ids` immediately identifies affected jobs and their claimants) and makes traversal straightforward in both directions. Bidirectional refs are appropriate for stable entity relationships — not for transient operational state like private haul jobs (those are found via the unit walk during deletion).
 
 IDS
 
-One global incrementing counter for all entity types (units, memories, buildings, jobs, stacks, items, hauling orders, ground piles). Counter lives on the registry module: `registry.nextId()`. A unit's `id` persists when they die and become a memory. Plants (trees, herbs, berry bushes) are tile data — no IDs.
+One global incrementing counter for all entity types (units, memories, buildings, jobs, stacks, items, ground piles). Counter lives on the registry module: `registry.nextId()`. A unit's `id` persists when they die and become a memory. Plants (trees, herbs, berry bushes) are tile data — no IDs.
 
 CONFIG-TO-RUNTIME NAMING
 
@@ -110,7 +135,7 @@ BuildingConfig uses `default_` prefixed fields for values that are copied to run
 
 CLAUDE CODE GUIDANCE
 
-Claude Code edits only the **Pending Review** and **Implementation State** sections of CLAUDE.md. All other content in all project documents is off-limits without explicit instruction. If implementation reveals a discrepancy or design gap, add a brief note to Pending Review.
+Claude Code edits only the **Pending Review** and **Implementation State** sections of CLAUDE.md. All other content in all project documents is off-limits without explicit instruction. If implementation reveals a discrepancy or design gap, add a brief note to Pending Review. If a gap is large enough that resolving it would require design decisions beyond the spec, stop the session and add the question to Pending Review rather than guessing.
 
 FLAT INDEX CONVENTION
 
@@ -144,22 +169,18 @@ end
 Module skeleton:
 
 ```lua
--- simulation/hauling.lua
+-- simulation/filters.lua
 local world = require("core.world")
 local registry = require("core.registry")
 local log = require("core.log")
 
-local hauling = {}
+local filters = {}
 
-function hauling.postOrder(source_id, destination_id, resource_type)
+function filters.scanBuildings(tick)
     -- ...
 end
 
-function hauling.sweepCompleted()
-    -- ...
-end
-
-return hauling
+return filters
 ```
 
 OWNERSHIP MODEL
@@ -178,7 +199,7 @@ ARCHITECTURE
 - Composition over inheritance for units — class differences are data, not behavior. Single shallow `Unit` prototype. No subclasses — avoids runtime class-swapping on promotion. Single `unit.lua` file.
 - All skill keys present on every unit at 0 regardless of class. Serfs and gentry never grow skills. Only specialty freemen and clergy grow skills.
 - Hybrid registry: `registry[id]` for cross-type lookup; `world.*` arrays for typed iteration.
-- Deferred deletion: `is_dead`/`is_deleted` flag, update loops skip, sweep at end of tick (swap-and-pop). Unit cleanup (social, job, tile claim, home, bed, dynasty, ground pile drops) happens eagerly in `units.sweepDead`. Building cleanup (unit walk for private hauls, posted job cleanup, container drops, tile clearing, resident eviction, hauling order removal) happens eagerly in `buildings.sweepDeleted`.
+- Deferred deletion: `is_dead`/`is_deleted` flag, update loops skip, sweep at end of tick (swap-and-pop). Unit cleanup (social, job, tile claim, home, bed, dynasty, ground pile drops) happens eagerly in `units.sweepDead`. Building cleanup (unit walk for private hauls, posted job cleanup, container drops, tile clearing, resident eviction, filter source cleanup) happens eagerly in `buildings.sweepDeleted`.
 - All social relationships (friends, enemies) are bidirectional. When unit A befriends unit B, both `A.friend_ids` and `B.friend_ids` are updated. Death cleanup iterates only the dead unit's relationship lists (max 6 lookups), not all living units.
 - All rate values stored as per-tick — use conversion constants in config tables.
 
@@ -192,7 +213,7 @@ LUA PERFORMANCE
 
 ## Constants
 
-All constants in `config/constants.lua`.
+All constants in `config/constants.lua`. Loaded once via `require("config.constants")` in `main.lua` before any other module. All values are globals — no per-file require needed.
 
 ```lua
 -- Priorities
@@ -279,7 +300,10 @@ WAREHOUSE_CAPACITY            = 128  -- total weight capacity for warehouse
 GROUND_PILE_PREFERRED_CAPACITY = 64   -- soft cap: drop function prefers to spread to adjacent tiles above this
 
 -- Ground drops
-GROUND_DROP_SEARCH_RADIUS = 0   -- Manhattan distance to search for an empty tile when dropping
+GROUND_DROP_SEARCH_RADIUS = 2   -- flood fill distance to search for an empty tile when dropping
+
+-- Resource scanning
+RESOURCE_SCAN_RADIUS = 100  -- flood fill tile cap for nearest map resource search from buildings
 
 -- Food
 FOOD_VARIETY_WINDOW = 3 * TICKS_PER_DAY   -- food types eaten within this window count for variety bonus
@@ -302,6 +326,10 @@ DAY_NAMES    = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday
 SEASON_NAMES = { "Spring", "Summer", "Autumn", "Winter" }
 ```
 
+## Strings
+
+Display names and descriptions for all game entities live in `config/strings.lua`. Regular module (not globals) — required only by UI code via `local strings = require("config.strings")`. Keyed by entity type and then by internal identifier: `strings.buildings[building_type].name`, `strings.resources[resource_type].name`. Simulation and log code use internal string keys directly — they never need display names.
+
 ## Dev Tools and Testing
 
 LOG SYSTEM (`core/log.lua`)
@@ -310,9 +338,17 @@ Categories: `TIME`, `UNIT`, `JOB`, `WORLD`, `HEALTH`, `HAUL`, `SAVE`, `STATE`. S
 
 File output writes to `logs/` in the repo root using Lua's `io.open` — not `love.filesystem`, which writes to the save directory. Each session creates a timestamped file (e.g., `logs/2026-04-11_14-30-05.log`). On startup, if more than 20 log files exist, delete the oldest until 20 remain. Flush every log call. Overlay severity defaults to INFO, file severity defaults to DEBUG. `logs/` is in `.gitignore`.
 
-DEVELOPER OVERLAY (`ui/overlay.lua`)
+DEVELOPER OVERLAY (`ui/dev_overlay.lua`)
 
 Toggled with F3. Stats bar: FPS, game_time, speed, unit/building/job counts. Tile inspector on hover: coordinates, terrain, plant_type/plant_growth, forest_depth, building_id, ground resources, claimed_by, visibility. Log tail: last ~10 messages.
+
+DEBUG SPAWN
+
+F1 spawns a serf at the cursor's tile position. Shift+F1 spawns 5 serfs. Input handling lives in the UI layer (`keypressed`); the UI resolves the cursor's world tile via camera coordinate conversion, then calls `units.spawnSerf(x, y)`. Spawn logic stays in the Units module where unit lifecycle belongs.
+
+Each spawned unit goes through the normal creation path — registry, name generation, needs initialized to full, target tile claimed, `tile.unit_ids` updated — so they're indistinguishable from game-start units. If the cursor tile is impassable (water, rock), the spawn is rejected (no fallback). If the tile is pathable but has `target_of_unit` set, ring search outward for the nearest pathable tile with `target_of_unit == nil`. Batch spawn (Shift+F1) places each unit sequentially — later units in the batch ring-search outward from tiles already claimed by earlier ones. If ring search hits the radius cap, that individual spawn is silently skipped.
+
+Logs each spawn: `log:info("UNIT", "Debug spawned unit %d at (%d, %d)", unit.id, x, y)`.
 
 CONFIG VALIDATION (STARTUP)
 
@@ -322,7 +358,7 @@ Runs during the `loading` game state — the game never reaches `playing` with b
 - Every BuildingConfig `job_type` references a valid JobTypeConfig key
 - Every JobTypeConfig entry with `skill` references a valid key in the unit skills table
 - Every BuildingConfig with `category == "processing"` has `max_workers == 1`
-- Every BuildingConfig with `tile_map` has exactly one D tile, all layout positions fall on F or D tiles, all F/D tiles are contiguous and reachable from D, all non-D perimeter tiles are W
+- Every BuildingConfig with `tile_map` has exactly one D tile, all layout positions fall on F or D tiles, all F/D tiles are contiguous and reachable from D, all non-D perimeter tiles are W unless on the back face (opposite the door) of a building with a `placement` field
 - Every MerchantConfig bin_threshold key exists in ResourceConfig
 - Every ResourceConfig entry with `is_stackable == false` has `max_durability`
 - Every ResourceConfig entry with `nutrition` has `is_stackable == true`
@@ -350,11 +386,11 @@ Test runner (`tests/run.lua`) prepends `src/` to `package.path`, requires each r
 
 ```lua
 -- tests/test_carrying.lua
-local constants = require("config.constants")
+require("config.constants")
 
 local function test_speedPenaltyAtMaxWeight()
-    local weight_ratio = 32 / constants.CARRY_WEIGHT_MAX
-    local slow_factor = constants.MAX_CARRY_SLOW * (1 - 0 / 20)
+    local weight_ratio = 32 / CARRY_WEIGHT_MAX
+    local slow_factor = MAX_CARRY_SLOW * (1 - 0 / 20)
     local move_speed = 1.0 * (1 - weight_ratio * slow_factor)
     assert(move_speed == 0.5, "zero-strength unit at max weight should be half speed")
 end
@@ -374,14 +410,14 @@ Rendering, UI, camera, input handling, high-level integration (e.g., "does a woo
 
 | Module | Owns |
 |---|---|
-| **Game State** | State stack, current state, Love2D callback delegation. |
+| **Game State** | State stack, current state, Love2D callback delegation. Lives in `app/`. |
 | **Time** | Clock behavior: `advance()`, `accumulate(dt)`, `hashOffset()`, `getEnergyThresholds()`. Operates on `world.time`. |
 | **Simulation** | The `onTick` orchestrator. Owns no data. |
-| **World** | Tile grid, forest depth map, plant system. Owns all entity arrays and game state: `world.units`, `world.buildings`, `world.jobs`, `world.stacks`, `world.items`, `world.hauling_orders`, `world.time`, `world.magic`, `world.settings`. Ground resource storage is implementation-dependent. |
+| **World** | Tile grid, forest depth map, plant system. Owns all entity arrays and game state: `world.units`, `world.buildings`, `world.jobs`, `world.stacks`, `world.items`, `world.time`, `world.magic`, `world.settings`. Ground resource storage is implementation-dependent. |
 | **Units** | Unit lifecycle and behavior (creation, death, promotion). Operates on `world.units`. |
 | **Resources** | Stack/item creation, destruction, transfer, counting. Maintains `world.resource_counts`. Operates on `world.stacks` and `world.items`. |
 | **Job Queue** | Job posting and filtering logic. Operates on `world.jobs`. |
-| **Hauling Orders** | Hauling order scanning and job posting. Operates on `world.hauling_orders`. |
+| **Storage Filters** | Filter pull scanning and job posting. Operates on storage building filter tables. |
 | **Magic** | Spell execution. Operates on `world.magic`. |
 | **Dynasty** | Succession logic, leader tracking. |
 | **Events** | Scheduled and triggered events. |
@@ -389,14 +425,14 @@ Rendering, UI, camera, input handling, high-level integration (e.g., "does a woo
 | **Log** | Ring buffer, severity filtering, file output. |
 | **Save** | Serialization/deserialization. |
 | **Camera** | Position, zoom, coordinate conversion. |
-| **Input** | Input abstraction and action map. |
-| **Overlay** | Dev overlay rendering. Pure UI, never writes to simulation. |
+| **UI Hub** | Input routing (mouse and keyboard dispatch), draw ordering, active layer resolution, interaction mode state. Lives in `ui/ui.lua`. |
+| **Dev Overlay** | Dev overlay rendering (F3). Pure UI, never writes to simulation. |
 | **Renderer** | Tile, building, unit, ground pile rendering. Fog of war. |
 
 ## Serialization
 
 Pure Lua table literals via `love.filesystem`. Versioned format. Each module has `.serialize()` / `.deserialize()`.
 
-**Saved:** `world` (all entity arrays: units, buildings, jobs, stacks, items, hauling_orders, ground_piles; tiles skipping visibility; time, magic, settings), memories, dynasty, `registry.next_id`, player settings.
+**Saved:** `world` (all entity arrays: units, buildings, jobs, stacks, items, ground_piles; tiles skipping visibility; time, magic, settings), memories, dynasty, `registry.next_id`, player settings.
 
 **Rebuilt on load:** registry hash table (from all `world.*` entity arrays), per-unit visibility buffers, tile.is_explored/visible_count, `world.resource_counts` (via `resources.rebuildCounts()`).

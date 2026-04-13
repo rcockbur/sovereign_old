@@ -1,5 +1,5 @@
 # Sovereign — ECONOMY.md
-*v1 · Resource infrastructure: entities, containers, reservations, hauling, merchant delivery.*
+*v5 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
 
 ## Resource System
 
@@ -28,7 +28,7 @@ item = {
 }
 ```
 
-Items are non-fungible — each one is unique. Durability decreases over time: tools drain per tick during the `work` activity, clothing and jewelry drain per tick while awake. When durability reaches 0, the item is destroyed (removed from `world.items` and registry). The unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning per phase.
+Items are non-fungible — each one is unique. Durability decreases over time: tools drain per tick during the `work` activity, clothing drains per tick while awake. When durability reaches 0, the item is destroyed (removed from `world.items` and registry). The unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning per phase.
 
 CONTAINERS
 
@@ -57,7 +57,7 @@ tile_entry = {
 }
 ```
 
-Per-tile capacity is `STOCKPILE_TILE_CAPACITY` for stacks. Items: one per tile regardless of weight. A building-level `filters` table controls which types the stockpile accepts — only types in the filter list are allowed. `filters = {}` means accept all types.
+Per-tile capacity is `STOCKPILE_TILE_CAPACITY` for stacks. Items: one per tile regardless of weight. A building-level `filters` table controls which types the stockpile accepts and how — see Storage Filter System for filter semantics.
 
 **Stack inventory** — flat array of stack entity ids with total weight capacity. Used by: warehouses. Only accepts stackable resources.
 
@@ -66,7 +66,7 @@ stack_inventory = {
     container_type = "stack_inventory",
     capacity = 0,        -- total weight capacity
     contents = {},       -- flat array of stack entity ids
-    filters = {},        -- building-level accept list (stackable resources only)
+    filters = {},        -- per-type filter entries (stackable resources only) — see Storage Filter System
     reserved_in = 0,
     reserved_out = 0,
 }
@@ -79,7 +79,7 @@ item_inventory = {
     container_type = "item_inventory",
     item_capacity = 40,  -- max number of items
     contents = {},       -- flat array of item entity ids
-    filters = {},        -- building-level accept list (items only)
+    filters = {},        -- per-type filter entries (items only) — see Storage Filter System
     reserved_in = 0,
     reserved_out = 0,
 }
@@ -109,14 +109,14 @@ All containers use `reserved_in` and `reserved_out` to prevent collisions from c
 - **Available capacity** = capacity - used - reserved_in
 - **Available stock** = stock - reserved_out
 
-Reservations are placed when a haul job is claimed (whether public or private). Every resource transfer in the game goes through a haul job — self-fetch, self-deposit, hauling orders, construction delivery, merchant delivery, and ground pile cleanup all post jobs and all use reservations.
+Reservations are placed when a haul job is claimed (whether public or private). Every resource transfer in the game goes through a haul job — self-fetch, self-deposit, filter pull jobs, construction delivery, merchant delivery, and ground pile cleanup all post jobs and all use reservations.
 
 Jobs fall into two categories:
 
 | Category | Posted by | Claimable by | Examples |
 |---|---|---|---|
 | Private | Unit, claimed atomically | Same unit only | Self-fetch, self-deposit, merchant delivery, home food self-fetch, eating trip reservation, equipment want fetch |
-| Public | System or entity | Any eligible hauler | Construction delivery, ground pile cleanup, hauling order jobs |
+| Public | System or entity | Any eligible hauler | Construction delivery, ground pile cleanup, filter pull jobs |
 
 Private jobs are invisible to other units but visible to the reservation system. They exist purely as a vehicle for reservation tracking and cleanup.
 
@@ -134,8 +134,8 @@ The module uses a generic container interface. Callers pass a container referenc
 
 - `resources.getStock(container, type)` — total amount of `type` in the container.
 - `resources.getAvailableStock(container, type)` — stock minus `reserved_out`. What can actually be picked up.
-- `resources.getAvailableCapacity(container, type)` — remaining capacity minus `reserved_in`. What can actually be deposited. Ground piles return a large value (no capacity enforcement by the container — the drop function manages per-tile weight limits externally).
-- `resources.accepts(container, type)` — filter check. Bins: `container.type == type`. Tile inventory / stack inventory / item inventory: `next(filters) == nil or filters[type] == true`. Ground piles: always true.
+- `resources.getAvailableCapacity(container, type)` — remaining capacity minus `reserved_in`. For storage containers with a filter limit on `type`, returns `min(physical_capacity, limit - current_stock_of_type) - reserved_in`. Ground piles return a large value (no capacity enforcement by the container — the drop function manages per-tile weight limits externally).
+- `resources.accepts(container, type)` — filter check. Bins: `container.type == type`. Tile inventory / stack inventory / item inventory: `filters[type].mode ~= "reject"`. Ground piles: always true.
 - `resources.countWeight(carrying)` — total weight across all entity ids in a flat array. Used for carrying weight checks.
 
 **Transfer operations:**
@@ -146,7 +146,8 @@ The module uses a generic container interface. Callers pass a container referenc
 
 **Carrying operations (weight-based, separate from generic container API):**
 
-- `resources.depositToCarrying(unit, entity_id)` — add entity to `unit.carrying`. Updates `resource_counts.carrying` and recalculates `unit.move_speed`.
+- `resources.carryEntity(unit, entity_id)` — move an existing entity into `unit.carrying`. For stacks, if already carrying the same type, merges (adds amount, destroys the incoming entity). If carrying is empty, appends. Asserts if carrying contains a different type. Updates `resource_counts.carrying` and recalculates `unit.move_speed`. Used by haulers after withdrawing from a container.
+- `resources.carryResource(unit, type, amount)` — create resources directly into `unit.carrying`. If already carrying a stack of the same type, increments its amount. If carrying is empty, creates a new stack and appends. Asserts if carrying contains a different type. Asserts if total weight would exceed carry cap. Updates `resource_counts.carrying` and recalculates `unit.move_speed`. Used by workers who produce resources (harvest, extraction, crafting).
 - `resources.withdrawFromCarrying(unit, type, amount)` — remove `amount` of `type` from `unit.carrying`. Returns entity ids. Updates `resource_counts.carrying` and recalculates `unit.move_speed`.
 
 **Equip operations:**
@@ -163,7 +164,7 @@ For tile inventory, reserve/release operate on a specific tile entry (the module
 
 **Lifecycle operations:**
 
-- `resources.create(type, amount)` — creates stack or item entities in `world.stacks`/`world.items` via `registry.createEntity`. For stacks, creates one stack with the given amount. For items, `amount` is how many to create (returns an array of ids). Does not place them in a container — caller uses `deposit` or `depositToCarrying` next.
+- `resources.create(type, amount)` — creates stack or item entities in `world.stacks`/`world.items` via `registry.createEntity`. For stacks, creates one stack with the given amount. For items, `amount` is how many to create (returns an array of ids). Does not place them in a container — caller uses `deposit` or `carryEntity` next. Not used for production output — workers use `carryResource` which handles creation internally.
 - `resources.destroy(entity_id)` — removes from `world.stacks`/`world.items` and registry. Caller must have already removed the entity from its container. Updates resource counts for the appropriate category.
 
 **Count operations:**
@@ -255,7 +256,7 @@ ground_pile = {
 }
 ```
 
-Ground piles self-post one haul job per resource type they contain. When a hauler picks up all entities of a given type, the corresponding job is removed. When the pile is fully emptied, it is destroyed (removed from `world.ground_piles` and registry, `tile.ground_pile_id` cleared). If no valid storage has capacity, the jobs still post but won't be claimed until space opens up — the pile persists on the ground indefinitely. Ground pile haul jobs use `destination_id = nil` — the hauler resolves the nearest valid storage with capacity at claim time, consistent with hauling order nil-destination semantics. If no storage has capacity, the job is skipped.
+Ground piles self-post one haul job per resource type they contain. When a hauler picks up all entities of a given type, the corresponding job is removed. When the pile is fully emptied, it is destroyed (removed from `world.ground_piles` and registry, `tile.ground_pile_id` cleared). If no valid storage has capacity, the jobs still post but won't be claimed until space opens up — the pile persists on the ground indefinitely. Ground pile haul jobs use `destination_id = nil` — the hauler resolves the nearest valid storage with capacity at claim time. If no storage has capacity, the job is skipped.
 
 Not a player-configurable entity. No filters, no settings.
 
@@ -264,65 +265,84 @@ GROUND DROP SEARCH
 When a unit drops resources, each resource type is dropped one at a time. For each type, the drop function searches outward from the unit's position:
 
 1. Same-type ground pile with remaining weight capacity below `GROUND_PILE_PREFERRED_CAPACITY` (stackable) or empty tile → merge or place
-2. Empty tile within `GROUND_DROP_SEARCH_RADIUS` (Manhattan distance) → create new pile
+2. Empty pathable tile within `GROUND_DROP_SEARCH_RADIUS` (flood fill along pathable tiles) → create new pile
 3. Fallback: drop on the unit's current tile regardless (mixed-type overlap)
 
 Items follow a simpler search: empty tile → fallback to current tile. One item per ground tile.
 
-`GROUND_DROP_SEARCH_RADIUS` starts at 0 — all drops land on the unit's tile. The search radius can be increased later to scatter drops outward; the intent is that spills look like resources scattering around the unit's feet. The search should NOT prefer any strategically useful direction (e.g., toward stockpiles).
+`GROUND_DROP_SEARCH_RADIUS` is 2. The search uses flood fill along pathable tiles (not ring search), so drops never land across water or behind walls. At radius 2 this is at most ~24 tiles — trivial cost. The search should NOT prefer any strategically useful direction (e.g., toward stockpiles).
 
 The drop function prefers to keep ground piles below `GROUND_PILE_PREFERRED_CAPACITY` (64) by creating new piles on adjacent tiles. This is a soft cap — if no adjacent tiles are available, stacking beyond the limit is allowed.
 
-## Hauling Order System
+## Storage Filter System
+
+Storage buildings (stockpiles, warehouses, barns) use a per-type filter system that controls both what the building accepts and whether it actively pulls resources from other storage.
+
+FILTER TABLE
+
+Every storage building has a `filters` table on its container, populated at building creation from ResourceConfig. Stockpiles get all resource types. Warehouses get stackable types only (constrained by `is_stackable_only`). Barns get item types only (constrained by `is_items_only`). Every entry defaults to `{ mode = "accept", limit = nil }`.
+
+```lua
+filters = {
+    wood  = { mode = "accept", limit = nil },
+    iron  = { mode = "get",    limit = 100, source_id = 5 },
+    stone = { mode = "reject" },
+}
+```
+
+Three modes per type:
+
+- **reject** — building will not accept this type. Existing stock of a rejected type is not automatically removed — it remains until withdrawn by a pull from another building.
+- **accept** — building passively accepts deliveries (default routing, ground pile cleanup, self-deposit). Optional `limit` caps how much the building will hold of this type.
+- **get** — building actively pulls this type from another storage building. Required `limit` sets the target amount. Optional `source_id` names a specific source building; nil means "from anywhere."
+
+`resources.accepts()` returns true for "accept" and "get" modes, false for "reject." `resources.getAvailableCapacity()` respects the filter limit — if set, capacity is `min(physical_capacity, limit - current_stock_of_type) - reserved_in`.
+
+PULL MECHANICS
+
+The filter system scans storage buildings via hash-offset (once per `HASH_INTERVAL`). For each building, it checks filter entries in "get" mode and posts haul jobs based on deficit:
+
+```lua
+needed = limit - current_stock - reserved_in
+available = source_available_stock
+transfer = min(needed, available)
+
+units_per_trip = floor(CARRY_WEIGHT_MAX / ResourceConfig[resource].weight)
+trips_needed = ceil(transfer / units_per_trip)
+jobs_to_post = max(0, trips_needed - jobs_in_transit_for_this_filter)
+```
+
+SOURCE RESOLUTION
+
+**"Get from specific building"** (`source_id` set): pull directly from the named building regardless of its filter mode, subject to cycle detection. Stock checks respect reservations.
+
+**"Get from anywhere"** (`source_id` is nil): find the nearest storage building with available stock of the type whose filter for that type is NOT in "get" mode. Buildings with the type set to "accept" or "reject" are both valid sources — "reject" means the building won't accept new deliveries of that type, not that its existing stock is unavailable. Buildings with the type in "get" mode are excluded to prevent tug-of-war between two buildings that are both actively acquiring the same resource.
+
+CYCLE DETECTION
+
+When the player sets a filter entry on building A to "get type R from building B," reject if building B's filter for type R is already "get from building A." 3+ building cycles are on the player.
+
+EDGE CASES
+
+- Source empty at pickup: job fails, removed, reservations released, re-evaluated next scan.
+- Destination full at delivery: hauler follows through to next valid storage, or drops via ground drop search. One followthrough attempt.
+- Competing demand (two buildings pulling same type from same source): reservations prevent over-commitment.
+- Resource with no valid destination: drop via ground drop search. Always.
+- Source building deleted: any filter entry on other buildings with `source_id` pointing to the deleted building reverts to `{ mode = "accept", limit = <preserved> }`. Keeps the limit, drops the directive.
+
+RESOURCE MOVEMENT OVERVIEW
 
 Two systems handle resource movement. They don't overlap.
 
-**Ground pile cleanup** posts haul jobs directly when piles are created. **Construction delivery** posts haul jobs on building placement. Both bypass hauling orders.
+**Ground pile cleanup** posts haul jobs directly when piles are created. **Construction delivery** posts haul jobs on building placement. Both are independent of the filter system.
 
-**Hauling orders** are player-configured directives for moving resources between storage buildings. Source and destination must be storage buildings (stockpile, warehouse, barn) or nil ("any storage building"). Hauling orders never reference production, housing, or service buildings. No auto-generated orders — the system starts empty.
+**Storage filters** control all inter-storage resource flow. Default routing (self-deposit, ground pile cleanup) delivers to the nearest storage building that accepts the type and has capacity. "Get" filter entries post pull jobs to actively move resources between specific buildings. The filter table on each storage building is the complete logistics configuration.
 
-ORDER MECHANICS
-
-**Master list:** All hauling orders live on `world.hauling_orders`. The player can create, edit, and delete orders from any storage building's UI or (when built) a master hauling UI.
-
-**Deficit-based posting:** The hauling order system scans orders via hash-offset (once per `HASH_INTERVAL`). For each active order, stock levels are resolved on the source and destination buildings:
-
-```lua
--- Push (source_threshold set): move excess out of source
-available = source_stock - source_threshold
--- Pull (destination_threshold set): fill destination to target
-needed = destination_threshold - dest_stock
--- Both set: min of available and needed
-transfer_amount = min(available, needed)
-
-units_per_trip = floor(CARRY_WEIGHT_MAX / ResourceConfig[resource].weight)
-trips_needed = ceil(transfer_amount / units_per_trip)
-jobs_to_post = max(0, trips_needed - jobs_in_transit_for_this_order)
-```
-
-Stock and capacity checks respect reservations. `source_stock` uses available stock (actual - reserved_out). `dest_stock` accounts for reserved_in.
-
-When source_id or destination_id is nil, resolved to nearest valid storage building at job-posting time.
-
-**Threshold semantics:**
-- `source_threshold`: "keep at least this much at the source; push the excess." Nil = push everything.
-- `destination_threshold`: "fill the destination up to this level." Nil = fill to capacity.
-
-**Cycle detection:** When creating an order with resource R from building A to building B (both specific), reject if any existing order moves resource R from B to A. 3+ building cycles are on the player.
-
-**Edge case resolution:**
-- Source empty at pickup: job fails, removed, reservations released, re-evaluated next scan.
-- Destination full at delivery: hauler follows through to next valid storage, or drops via ground drop search. One followthrough attempt.
-- Competing demand (two orders pulling same resource from same source): reservations prevent over-commitment.
-- Resource with no valid destination: drop via ground drop search. Always.
-
-**Job selection:** All jobs (hauling order jobs, ground pile cleanup, construction delivery) are scored by two universal factors: distance to source and job age. No job-type-specific scoring. Serfs filter by their per-job-type priority settings (DISABLED / LOW / NORMAL / HIGH) — this determines which job types a serf considers, not how individual jobs within a type are ranked.
-
-Player priority on hauling orders is deferred — add if playtesting reveals the need.
+**Job selection:** All haul jobs (filter pull jobs, ground pile cleanup, construction delivery) are scored by two universal factors: distance to source and job age. No job-type-specific scoring. Serfs filter by their per-job-type priority settings (DISABLED / LOW / NORMAL / HIGH) — this determines which job types a serf considers, not how individual jobs within a type are ranked.
 
 ## Merchant Delivery System
 
-The merchant is a stationed specialty worker at the market. They claim the market's job once and run an internal delivery loop for food only. Equipment (tools, clothing, jewelry) is handled by units themselves — see BEHAVIOR.md Equipment Wants. Each delivery run uses the private haul job pattern for reservation tracking: the merchant self-posts a haul job (source = storage building, destination = housing bin), claims it immediately, reserves stock at source and capacity at destination. This is the only system that writes to housing building bins. Without a market, units self-fetch food — see BEHAVIOR.md Home Food Self-Fetch.
+The merchant is a stationed specialty worker at the market. They claim the market's job once and run an internal delivery loop for food only. Equipment (tools, clothing) is handled by units themselves — see BEHAVIOR.md Equipment Wants. Each delivery run uses the private haul job pattern for reservation tracking: the merchant self-posts a haul job (source = storage building, destination = housing bin), claims it immediately, reserves stock at source and capacity at destination. This is the only system that writes to housing building bins. Without a market, units self-fetch food — see BEHAVIOR.md Home Food Self-Fetch.
 
 MERCHANT LOOP
 
@@ -355,3 +375,23 @@ The merchant drops `drop_amount` (2) at each home per visit. This distributes su
 ROUTE ELIGIBILITY
 
 Homes visited on a critical run must be below the serious threshold (total food per member). Homes visited on a standard run must be below the `bin_threshold` for the selected food type. The criteria that triggered the run determine which homes are eligible stops — a critical food run does not also deliver to homes that merely want variety.
+
+## Firewood and Home Heating
+
+FIREWOOD PRODUCTION
+
+Wood is processed into firewood at a chopping block (or similar simple building — exact building name TBD). Firewood is a stackable resource consumed by two systems: home heating in winter and steel production at the bloomery. The bloomery recipe requires firewood as an input alongside iron. See TABLES.md RecipeConfig for the steel recipe.
+
+Wood now serves three competing purposes: construction (build costs), firewood for home heating, and firewood for smelting. This tension is the core design intent — the player who over-invests in steel production going into winter risks running short on heating fuel.
+
+HOME HEATING
+
+*Pending detailed design.* High-level concept:
+
+Homes consume firewood during winter to keep residents warm. Firewood must be delivered to homes (delivery mechanism TBD — possibly an extension of the merchant system, or a dedicated firewood delivery job). Homes that run out of firewood impose a mood or health penalty on residents.
+
+Key design questions to resolve:
+- Delivery mechanism — merchant, storage filter pulls, or a new system
+- Consumption rate — per-home or per-resident, constant or temperature-dependent
+- Failure consequence — mood penalty, health damage, or both
+- Storage — does housing need a firewood bin (similar to food bins), or is firewood tracked differently

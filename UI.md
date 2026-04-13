@@ -1,11 +1,53 @@
 # Sovereign — UI.md
-*v1 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
+*v5 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
 
 ## Camera
 
 Top-down orthographic. Fixed orientation — no rotation.
 
 Zoom range: `ZOOM_MIN` (0.5) to `ZOOM_MAX` (2.0). Pan via edge scroll or keyboard. Tile-to-screen conversion is a direct scale — no isometric projection math.
+
+## Architecture
+
+MODULE STRUCTURE
+
+UI is organized as per-region modules coordinated by a hub (`ui/ui.lua`). Each region owns its own draw and input handling. The hub calls them in the correct order for input routing and drawing. Adding a new region means adding it to the hub's two call lists.
+
+```
+ui/
+  ui.lua              -- hub: input routing, draw ordering, active_layer, interaction mode
+  right_panel.lua
+  left_panel.lua
+  action_bar.lua      -- persistent buttons (placement, designation)
+  command_bar.lua     -- contextual buttons based on selection (delete, draft, etc.)
+  overlays.lua        -- management panels (population list, serf priorities)
+  camera.lua
+  renderer.lua
+  dev_overlay.lua     -- F3 debug overlay
+```
+
+INPUT ROUTING
+
+`ui.lua` resolves which layer owns the mouse once per frame during `update`, based on mouse position and panel visibility. The result is stored as `ui.active_layer`. Clicks dispatch to the owning layer's handler via early return. Draw code reads `active_layer` to decide whether to show hover states. The game world only processes input or draws hover effects when no UI layer claimed the mouse.
+
+Priority chain (first match wins): management overlay (if open) → left panel (if open) → action bar → command bar → right panel → game world.
+
+DRAW ORDER
+
+`playing:draw()` makes two passes in sequence with no interleaving:
+
+1. **World pass** — camera transform applied. Tiles, buildings, units, ground piles, placement ghosts, designation markers. Everything that exists in world-space.
+2. **UI pass** — no camera transform. Panels, buttons, notifications, tooltips. Everything in screen-space.
+
+The renderer handles the world pass. `ui.draw()` handles the UI pass.
+
+INTERACTION MODES
+
+The action bar can put the player into a mode that changes what game-world clicks mean. The current mode lives on the hub (`ui.mode`) so all consumers read from one place.
+
+Modes: `normal` (default — clicks select entities), `placing` (clicks place a building, carries building type and orientation), `designating` (clicks mark tiles, carries designation type), `cancelling` (clicks remove designations).
+
+The action bar sets the mode. The game world input handler reads it to decide what clicks do. The renderer reads it to draw placement ghosts or designation previews. Escape and right-click reset to `normal`.
 
 ## Input
 
@@ -27,6 +69,9 @@ HOTKEYS
 | X | Cancel Designation |
 | Tab | Rotate building (in placement mode) |
 | Del | Delete selected building |
+| F1 | Debug: spawn serf at cursor |
+| Shift+F1 | Debug: spawn 5 serfs at cursor |
+| F3 | Toggle developer overlay |
 
 Building and designation hotkeys expand as new buildings and designation types come online in later phases.
 
@@ -38,9 +83,9 @@ Three persistent regions:
 
 **Left panel** — appears on selection, closes on Escape or clicking empty ground. Shows information about the selected entity. Also hosts entity configuration controls — filters, production orders, farm controls, specialty assignment. The left panel is for inspecting and managing the long-term state of an entity.
 
-**Bottom bar** — always visible. Contains two areas: the **action bar** (persistent buttons for building placement, designation tools, management overlays) and the **command panel** (contextual buttons that change based on the current selection). The command panel is for immediate, frequent actions: delete for buildings, draft/undraft for units, combat commands (Phase 5), magic (Phase 6). If nothing is selected, the command panel is empty.
+**Bottom bar** — always visible. Contains two areas: the **action bar** (persistent buttons for building placement, designation tools, management overlays) and the **command bar** (contextual buttons that change based on the current selection). The command bar is for immediate, frequent actions: delete for buildings, draft/undraft for units, combat commands (Phase 5), magic (Phase 6). If nothing is selected, the command bar is empty.
 
-**Coexistence:** The left panel and bottom bar coexist — the player inspects a building while placing another. Management overlays (population list, hauling orders, serf priorities) are large panels opened from the action bar that may obscure the map. Escape closes them.
+**Coexistence:** The left panel and bottom bar coexist — the player inspects a building while placing another. Management overlays (population list, serf priorities) are large panels opened from the action bar that may obscure the map. Escape closes them.
 
 ## Selection
 
@@ -48,7 +93,7 @@ Left-click selects a single entity: unit, building, map object (tree, bush, rock
 
 **Click priority** when multiple entities overlap on one tile: unit > ground pile > building > map object. No cycling on repeated clicks.
 
-Multi-select via drag box or shift-click selects multiple units. Multi-selected units show no left panel (no inspection) but enable group commands in the command panel (draft/undraft). Building multi-select is not supported.
+Multi-select via drag box or shift-click selects multiple units. Multi-selected units show no left panel (no inspection) but enable group commands in the command bar (draft/undraft). Building multi-select is not supported.
 
 ## Building Placement
 
@@ -60,17 +105,11 @@ A tinted footprint follows the cursor, snapping to the tile grid. Per-tile color
 
 VALIDATION
 
-Standard buildings: all footprint tiles must be on pathable terrain (grass/dirt). Clearing tiles must not overlap another building's wall tiles. The tile immediately outside the door must be pathable.
-
-Edge buildings (fishing dock, mines) have row-based terrain constraints relative to orientation. The door face is "front," the opposite edge is "back":
-- Fishing dock: back row must be on water, front row must be on grass/dirt, middle rows can be any terrain.
-- Mines (iron, gold): back row must be on rock, front row must be on grass/dirt, middle rows can be any terrain.
-
-Edge buildings can transform impassable tiles (water, rock) into passable interior space when built.
+See WORLD.md Placement Validation for all placement rules (terrain, clearing overlap, door adjacency, unit occupancy, edge buildings, solid buildings). The ghost preview displays per-tile validity: green = valid, red = invalid. Left-clicking an invalid position does not place the building — a brief red pulse on the ghost and an error sound provide feedback.
 
 ROTATION
 
-Tab cycles orientation: N → E → S → W. The ghost updates immediately. Player-sized buildings (stockpile, farm) have no orientation and do not rotate.
+Tab cycles orientation: N → E → S → W. The ghost updates immediately. Player-sized buildings (stockpile, farm) and solid buildings (gathering hubs) have no orientation and do not rotate.
 
 FIXED-SIZE PLACEMENT
 
@@ -83,10 +122,6 @@ Click-and-drag to define a rectangle. Ghost starts at the click origin and stret
 EXITING PLACEMENT MODE
 
 Before placing the first building: right-click or Escape exits. After placing the first building: right-click, Escape, or releasing shift exits.
-
-INVALID PLACEMENT FEEDBACK
-
-Left-clicking on an invalid position does not place the building. A brief red pulse on the ghost and an error sound provide feedback. The per-tile red coloring already indicates which tiles are the problem.
 
 ## Designation
 
@@ -151,7 +186,7 @@ The dump refreshes live so the player sees values changing in real time — need
 
 As the game matures, per-entity-type panels with designed layouts replace the debug dump. The left panel also hosts entity configuration controls (stockpile filters, production orders, farm controls, specialty assignment) as they come online in Phase 2.
 
-## Command Panel
+## Command Bar
 
 Contextual buttons in the bottom bar based on the current selection. Empty when nothing is selected.
 
@@ -185,7 +220,7 @@ FUTURE BUTTONS (Phase 2+)
 
 - Additional building buttons as new building types come online
 - Additional designation types (herbs in Phase 3)
-- Management overlay buttons: Serf Priorities (Phase 2), Hauling Orders (Phase 2)
+- Management overlay buttons: Serf Priorities (Phase 2)
 
 ## Management Overlays
 
@@ -199,9 +234,9 @@ SERF PRIORITY CONFIGURATION (Phase 2)
 
 *Pending design.*
 
-HAULING ORDER MASTER LIST (Phase 2)
+STORAGE FILTER CONFIGURATION (Phase 2)
 
-*Pending design.*
+Per-type filter controls on storage building left panels. Each resource type shows its current mode (reject / accept / get) and optional limit. "Get" entries allow selecting a source building. See ECONOMY.md Storage Filter System for filter mechanics.
 
 ## Notifications
 

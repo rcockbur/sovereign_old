@@ -1,5 +1,5 @@
 # Sovereign — BEHAVIOR.md
-*v1 · Unit behavior: tick order, update loops, activity system, classes and specialties.*
+*v3 · Unit behavior: tick order, update loops, activity system, classes and specialties.*
 
 ## Simulation
 
@@ -109,16 +109,17 @@ All cleanup runs eagerly at end of tick in `units.sweepDead`:
 3. Social cleanup (iterate dead unit's friend_ids/enemy_ids — max 6 — remove from each counterpart's list)
 4. Family references stay (father_id/spouse_id pointing to memory is correct)
 5. Target tile cleanup (clear `tiles[unit.target_tile].target_of_unit`)
-6. Job cleanup — remove `job_id` job from queue: if it's a hauling job, remove entirely (ground pile drop in step 8 will self-post a replacement if needed); otherwise, remove the job from the building's `posted_job_ids` and from `world.jobs` so the building can post a new one. If `secondary_haul_job_id` is set, remove that haul job from queue and release its reservations (reserved_in at destination, reserved_out at source).
-7. Tile claim cleanup (clear `tiles[unit.claimed_tile].claimed_by`)
-8. Ground pile drop (drop carried resources AND equipped items via ground drop search at unit position — each type dropped separately per ground pile rules in ECONOMY.md)
-9. Home cleanup (remove from housing building's `housing.member_ids`; clear bed's unit_id via unit's bed_index)
-10. Dynasty check (trigger succession if is_leader)
-11. Remove from `world.units` (swap-and-pop)
+6. Tile position cleanup (remove unit from `tiles[tileIndex(unit.x, unit.y)].unit_ids`)
+7. Job cleanup — remove `job_id` job from queue: if it's a hauling job, remove entirely (ground pile drop in step 9 will self-post a replacement if needed); otherwise, remove the job from the building's `posted_job_ids` and from `world.jobs` so the building can post a new one. If `secondary_haul_job_id` is set, remove that haul job from queue and release its reservations (reserved_in at destination, reserved_out at source).
+8. Tile claim cleanup (clear `tiles[unit.claimed_tile].claimed_by`)
+9. Ground pile drop (drop carried resources AND equipped items via ground drop search at unit position — each type dropped separately per ground pile rules in ECONOMY.md)
+10. Home cleanup (remove from housing building's `housing.member_ids`; clear bed's unit_id via unit's bed_index)
+11. Dynasty check (trigger succession if is_leader)
+12. Remove from `world.units` (swap-and-pop)
 
 BUILDING DELETION (sweepDeleted)
 
-Runs at end of tick after `units.sweepDead`. The player marks a building for deletion by setting `is_deleted = true`. Buildings under construction follow the same path — most steps are no-ops (no residents, no operational containers, no hauling orders).
+Runs at end of tick after `units.sweepDead`. The player marks a building for deletion by setting `is_deleted = true`. Buildings under construction follow the same path — most steps are no-ops (no residents, no operational containers, no filter pull sources).
 
 For each building where `is_deleted == true`:
 
@@ -130,17 +131,19 @@ For each building where `is_deleted == true`:
 
 **2. Walk `posted_job_ids`** — for each job: if `job.claimed_by` is set, look up the claiming unit via registry, clear `unit.job_id`, clear `unit.claimed_tile` if set. Remove the job from `world.jobs`. This handles builders, construction haulers, and operational workers — every unit working at this building got there through a job the building posted.
 
-**3. Drop all container contents** as ground piles at the building's position — `construction.bins` (if under construction), `production.input_bins`, `housing.bins`, `storage`. Routed through the resources module so `resource_counts` updates.
+**3. Clear footprint tiles** — set `tile.building_id = nil` on all tiles in the footprint, restore pathability.
 
-**4. Clear footprint tiles** — set `tile.building_id = nil` on all tiles in the footprint, restore pathability.
+**4. Eject units on now-impassable tiles** — scan all units. Any unit whose position is on a tile that is now impassable (e.g., water or rock tiles restored after deleting a dock or mine) → teleport to the building's former door tile position. Update `tile.unit_ids` (remove from old, add to new) and `target_tile`/`target_of_unit` (release old, claim new). For regular buildings on grass/dirt, no tiles become impassable and this step is a no-op.
 
-**5. Evict residents** via `housing.member_ids` — for each member: clear `unit.home_id` and `unit.bed_index`. They become homeless.
+**5. Drop all container contents** as ground piles — `construction.bins` (if under construction), `production.input_bins`, `housing.bins`, `storage`. Ground drop search starts from the building's former door tile position. Routed through the resources module so `resource_counts` updates. For regular buildings the drop origin doesn't matter since all former footprint tiles are valid; for buildings on impassable terrain, the door tile is always on pathable ground.
 
-**6. Delete hauling orders** via `hauling_order_ids` — remove each order from `world.hauling_orders`.
+**6. Evict residents** via `housing.member_ids` — for each member: clear `unit.home_id` and `unit.bed_index`. They become homeless.
 
-**7. Remove from `world.buildings`** via swap-and-pop. Clear `registry[id]`.
+**7. Clear filter pull sources** — iterate all storage buildings. For any filter entry with `source_id` referencing this building, revert to `{ mode = "accept", limit = <preserved> }`.
 
-Ordering matters: the unit walk (step 1) releases `secondary_haul_job_id` claims before step 2 removes posted jobs. Step 2 clears primary `job_id` claims before step 3 drops container contents (so no unit thinks they're still picking up from a bin that's about to become a ground pile).
+**8. Remove from `world.buildings`** via swap-and-pop. Clear `registry[id]`.
+
+Ordering matters: the unit walk (step 1) releases `secondary_haul_job_id` claims before step 2 removes posted jobs. Step 2 clears primary `job_id` claims before step 5 drops container contents (so no unit thinks they're still picking up from a bin that's about to become a ground pile). Step 3 restores terrain before step 4 ejects units (so impassable tiles are detectable). Step 4 ejects units before step 5 drops ground piles (so piles land on tiles that are actually passable).
 
 ## Activity System
 
@@ -157,7 +160,7 @@ ACTIVITY TYPES
 
 Sleep is the only wait activity in Phase 1. Recreation (Phase 3) will define its own activity model when designed.
 
-Resource transfers (picking up from buildings, depositing to buildings) are instant inline operations performed by the handler between activities — not activities themselves. Work completion auto-grants resources to `unit.carrying` for gathering jobs (creates a stack entity via `resources.create`).
+Resource transfers (picking up from buildings, depositing to buildings) are instant inline operations performed by the handler between activities — not activities themselves. Work completion auto-grants resources to `unit.carrying` for gathering jobs (via `resources.carryResource`).
 
 JOB HANDLERS
 
@@ -220,7 +223,7 @@ Designation (player-posted, no hub):
 2. Path to the resource tile using adjacent-to-rect (1×1). If no valid orthogonal neighbor exists (all impassable or target-claimed), unclaim the tile, remove the job, go idle.
 3. On arrival validation: if the tile's plant is gone (chopped by another worker, or designation cancelled), remove the job and go idle.
 4. Execute work activity (duration from `PlantConfig[type].harvest_ticks`).
-5. On work completion: unclaim the tile, grant `PlantConfig[type].harvest_yield` of the resource to `unit.carrying` (creates a stack entity via `resources.create`). Remove the designation job from `world.jobs`.
+5. On work completion: unclaim the tile, grant `PlantConfig[type].harvest_yield` of the resource to `unit.carrying` (via `resources.carryResource`). Remove the designation job from `world.jobs`.
 6. Check: `unit:carryableAmount(type) >= PlantConfig[type].harvest_yield` AND another unclaimed designation of the same resource type exists? If yes → claim next nearest designation job (scan from **unit position**), go to step 2.
 7. If carry full or no more designations → self-deposit to nearest storage (private haul job with reservation).
 8. Job complete. Unit goes idle → polls for next job.
@@ -229,29 +232,35 @@ Each designation is one job per tile — consumed on completion. Cancelling a de
 
 Building-based (hub → resource → storage):
 
-1. Scan for the nearest valid resource tile from the **building position** (not the unit). Valid = correct plant type, mature (stage 3), and `claimed_by == nil`.
-2. Claim the tile: set `unit.claimed_tile` and `tile.claimed_by`.
-3. Path to the resource tile using adjacent-to-rect (1×1). If no valid orthogonal neighbor exists, unclaim the tile, scan for the next valid resource tile.
-4. Execute work activity (duration from `PlantConfig[type].harvest_ticks`).
-5. On completion: unclaim the tile, grant `PlantConfig[type].harvest_yield` of the resource to `unit.carrying` (creates a stack entity via `resources.create`).
-6. Check: `unit:carryableAmount(type) >= PlantConfig[type].harvest_yield` AND a valid tile exists (scan from **unit position**)? If yes → claim next tile, go to step 3.
-7. If carry full or no valid tiles → self-deposit to nearest storage (private haul job with reservation).
-8. Return to hub building, repeat from step 1.
-9. If no valid tile exists on step 1: worker idles at hub.
+**Job posting:** Gathering buildings gate job posting on target availability. On the building's hash tick, the building scans for unclaimed valid targets (correct plant type, mature, `claimed_by == nil`) from the building position. Jobs to post = `min(unclaimed_count, max_workers) - #posted_job_ids`. If zero or negative, no jobs are posted. This prevents workers from claiming jobs at buildings with no available resources. No pre-assignment — the building counts targets but does not track which specific targets correspond to which jobs.
 
-The first scan uses building position (keeps gatherers working near their hub). Subsequent scans use unit position (allows efficient chaining within a trip rather than bouncing back toward the hub).
+**Worker cycle:**
+
+1. Path to hub building (adjacent-to-rect). Arrive.
+2. Scan for the nearest valid resource tile from the **building position** (not the unit). Valid = correct plant type, mature (stage 3), and `claimed_by == nil`. If none → release job, go idle. Building's next hash tick will see fewer targets and adjust job count.
+3. Claim the tile: set `unit.claimed_tile` and `tile.claimed_by`.
+4. Path to the resource tile using adjacent-to-rect (1×1). If no valid orthogonal neighbor exists, unclaim the tile, scan for the next valid resource tile from unit position.
+5. Execute work activity (duration from `PlantConfig[type].harvest_ticks`).
+6. On completion: unclaim the tile, grant `PlantConfig[type].harvest_yield` of the resource to `unit.carrying` (via `resources.carryResource`).
+7. Check: `unit:carryableAmount(type) >= PlantConfig[type].harvest_yield` AND a valid tile exists (scan from **unit position**)? If yes → claim next tile, go to step 4.
+8. If carry full or no valid tiles → self-deposit to nearest storage (private haul job with reservation).
+9. Go to step 1.
+
+The worker always visits the hub before scanning. First cycle, every cycle — same flow. The first scan uses building position (keeps gatherers working near their hub). Subsequent scans within a trip use unit position (allows efficient chaining rather than bouncing back toward the hub).
+
+If a worker's scan at the hub finds nothing (step 2), the worker releases the job. The race condition (building counted a target that got claimed between the building's hash tick and the worker's arrival) resolves naturally — the building's next hash tick sees fewer targets and adjusts.
 
 Extraction (stationary work → storage):
 
 1. Worker stays at building, executes work activity (duration from `JobTypeConfig[type].work_ticks`).
-2. On completion: 1 unit of the resource goes into `unit.carrying`.
+2. On completion: 1 unit of the resource goes into `unit.carrying` (via `resources.carryResource`).
 3. Check: `unit:carryableAmount(type) >= 1`? If yes → go to step 1.
 4. If carry full → self-deposit to nearest storage.
 5. Return to building, repeat.
 
 Extraction yield is always 1 per work cycle. The cycle duration (work_ticks) is the tuning knob for extraction rate. Extraction buildings do not deplete — the cycle repeats indefinitely.
 
-Unclaim fires on job abandonment (need interrupt, draft, death). Death cleanup handles `claimed_tile` in sweepDead step 7.
+Unclaim fires on job abandonment (need interrupt, draft, death). Death cleanup handles `claimed_tile` in sweepDead step 8.
 
 PROCESSING WORK CYCLE
 
@@ -262,7 +271,7 @@ Worker checks `production_orders` top to bottom, takes the first match with avai
 1. Check building's input bins — enough for the top production order's recipe?
 2. If no → self-fetch. Excess stays in bin for future crafts.
 3. Subtract recipe inputs from bins, begin work activity.
-4. On completion → finished goods go into `unit.carrying`.
+4. On completion → finished goods go into `unit.carrying` (via `resources.carryResource`).
 5. Check: `unit:carryableAmount(output_type) >= recipe output amount` AND inputs available for another cycle? If both yes → go to step 3.
 6. If can carry more but no inputs → self-deposit, then self-fetch, return, go to step 3.
 7. If can't carry → self-deposit.
@@ -281,7 +290,7 @@ Planting:
 Harvest:
 
 1. Pick next eligible tile, travel to it, harvest (work activity, duration from `CropConfig[crop].harvest_ticks`).
-2. Crop goes into `unit.carrying`.
+2. Crop goes into `unit.carrying` (via `resources.carryResource`).
 3. More eligible tiles AND carrying has room for next tile's expected yield → go to step 1.
 4. More eligible tiles BUT carrying would overflow → drop ground pile on current tile, go to step 1.
 5. No more eligible tiles → self-deposit to nearest storage building, return to farm.
@@ -292,7 +301,7 @@ CONSTRUCTION WORK CYCLE
 
 On building placement: the building is created with `is_built = false`. A `construction` sub-table is populated — one bin per `build_cost` type, each sized to the exact required amount. For player-sized buildings, total build time is computed as `build_ticks_per_tile * tile_count` and stored on `construction.build_ticks`. Fixed-size buildings copy `build_ticks` from BuildingConfig directly. The builder reads `construction.build_ticks` regardless of building type.
 
-All blueprint tiles are immediately claimed and impassable. Haul jobs are posted for all `build_cost` materials (public jobs, bypassing the hauling order system) and a build job is posted. All go into `posted_job_ids`. Builders and construction haulers path to the building using adjacent-to-rect, arriving at whichever side is closest.
+All blueprint tiles are immediately claimed and impassable. Haul jobs are posted for all `build_cost` materials (public jobs, independent of the storage filter system) and a build job is posted. All go into `posted_job_ids`. Builders and construction haulers path to the building using adjacent-to-rect, arriving at whichever side is closest.
 
 Builder cycle:
 

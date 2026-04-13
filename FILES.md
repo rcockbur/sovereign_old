@@ -1,5 +1,5 @@
 # FILES.md — Document System Reference
-*v2*
+*v3*
 
 ## Documents
 
@@ -56,7 +56,7 @@ This table defines what DESIGN.md owns versus what the technical files own, per 
 | Needs | Three needs as pressure to stop working, starvation as failure mode | Drain rates, thresholds, interrupt firing conditions, availability gating |
 | Mood | Composite score concept, what drives it, productivity/deviancy consequences | Modifier values, threshold config, recalculation rules, food variety formula |
 | Health | Injury/illness/malnourishment as threats, death at 0 | Damage rates, recovery rates, illness config |
-| Economy | Production chain rationale, food fungibility, storage progression, hauling orders as player tool, resource collection methods (designation vs building-based) | Resource entities, containers, reservations, resource counts, unit work cycles, self-fetch/deposit |
+| Economy | Production chain rationale, food fungibility, storage progression, storage filters as player tool, resource collection methods (designation vs building-based) | Resource entities, containers, reservations, resource counts, unit work cycles, self-fetch/deposit |
 | Designation | Bootstrap role, player's first tool, relationship to building-based gathering | Job posting, tile claiming, work cycle (BEHAVIOR.md), UI interaction (UI.md) |
 | Farming | Crop risk/reward tradeoffs, seasonal personality, harvest timing as player agency | Per-tile crop state, frost mechanics, farm controls, farm job posting, maturity formula |
 | Buildings | Interior spaces, rotation, housing types, construction as milestone, deletion consequences | Tile maps, layout positions, clearing, placement validation, construction state, pathfinding integration, deletion cleanup sequence |
@@ -65,7 +65,7 @@ This table defines what DESIGN.md owns versus what the technical files own, per 
 | Map | Settlement vs forest, procedural generation from seed, forest as mysterious | Dimensions, terrain types, generation pipeline, forest depth formula |
 | Forest | Resource tiers by depth, atmosphere, inhabitants | Coverage percentages, plant types, growth/spread mechanics, movement costs |
 | Pathfinding | (not in DESIGN.md) | A*, tile costs, movement model, speed formula, collision |
-| Hauling | Hauling orders as optional logistics tool, both playstyles work | Deficit formula, threshold semantics, cycle detection, job selection |
+| Storage Filters | Storage filters as optional logistics tool, both playstyles work | Filter modes, pull mechanics, source resolution, cycle detection, job selection |
 | Dynasty | Leader as through-line, succession as drama, heir readiness | (succession traversal mechanics pending) |
 | Traits | Permanent tags, rarity, all have mechanical effects | (trait config values pending) |
 | Equipment | Degradation creates ongoing demand, units self-fetch | Equipment want checks, soft interrupt, fetch flow, durability drain |

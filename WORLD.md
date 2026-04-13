@@ -1,5 +1,5 @@
 # Sovereign — WORLD.md
-*v2 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
+*v4 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
 
 ## Map
 
@@ -134,7 +134,7 @@ unit.path = nil    -- { tiles = { idx1, idx2, ... }, current = 1 } or nil
 
 Unit advances `current` by 1 each movement step. When `current > #tiles`, the unit has arrived. If the next tile is blocked (building completed, new obstacle), clear the path and recompute.
 
-**Escape case:** If a unit starts A* on a tile belonging to a completed building (e.g., building finished while unit was inside), all tiles of *that specific building* are treated as passable for that query.
+**Escape case (Phase 2):** In P1, placement validation prevents buildings from being placed on occupied tiles, so units never start inside a building. When construction behavior is redesigned in Phase 2 (units build from inside, buildings complete around them), an escape case will be needed: if a unit starts A* on a tile belonging to a completed building, all tiles of *that specific building* are treated as passable for that query.
 
 TARGET TILE SYSTEM
 
@@ -147,12 +147,13 @@ A tile where `target_of_unit` is set cannot be the final destination of another 
 - **Starting a move (destination mode):** Check that the destination tile has `target_of_unit == nil`. Claim the destination: set `unit.target_tile` and `tile.target_of_unit`. Release the old target tile. Compute A*. If A* fails, release the new claim and re-claim the old tile.
 - **Starting a move (adjacent-to-rect mode):** Release old target tile. Run A* — the goal check includes `target_of_unit == nil` as an acceptance condition, so the arrival tile is determined by A* itself. Claim the result tile. This all happens within a single function call with no interleaving from other unit updates.
 - **Arrival:** Target tile stays on the arrival tile (no change needed).
-- **Destination becomes unavailable during transit:** Another unit claimed the destination tile while this unit was en route. On arrival, the unit searches outward for the nearest unclaimed pathable tile and moves there.
-- **Building placement on unit's tile:** The tile becomes impassable (blueprint). The unit searches outward for the nearest unclaimed pathable tile and moves there.
+- **Destination becomes unavailable during transit:** Another unit claimed the destination tile while this unit was en route. On arrival, flood fill outward from the unit's current position to find the nearest reachable tile that is pathable and has `target_of_unit == nil`. Move there.
 - **Death:** Release both sides (`unit.target_tile` and `tile.target_of_unit`). Handled in sweepDead.
-- **Game start:** Each spawned unit claims an initial target tile at their starting position during creation.
+- **Game start / debug spawn:** Each spawned unit claims an initial target tile at their starting position during creation.
 
-**Tile search:** When a unit needs a place to stand and its current or intended position is unavailable, it searches outward in expanding rings for the nearest tile that is pathable and has `target_of_unit == nil`. Small radius cap before falling back to overlapping on the current tile with a notification.
+**Tile position tracking:** `tile.unit_ids` tracks which units are currently on each tile. Maintained in three places: `moveStep` arrival at a new tile (remove from old, add to new), unit spawn (add), and `sweepDead` (remove). This enables O(1) lookup of units on a tile, used by placement validation and combat targeting (Phase 5).
+
+**Tile search (flood fill):** When a unit needs a place to stand and its current position is unavailable (destination claimed during transit), flood fill outward along pathable tiles from the unit's current position. Returns the nearest reachable tile with `target_of_unit == nil`.
 
 MOVEMENT MODEL
 
@@ -170,6 +171,10 @@ function unit:moveStep()
     self.move_progress = self.move_progress + self.move_speed
     if self.move_progress >= tile_cost then
         self.move_progress = self.move_progress - tile_cost
+        -- update tile.unit_ids: remove from old tile, add to new tile
+        local old_idx = tileIndex(self.x, self.y)
+        removeFromList(tiles[old_idx].unit_ids, self.id)
+        tiles[next_idx].unit_ids[#tiles[next_idx].unit_ids + 1] = self.id
         self.x = nx
         self.y = ny
         self.path.current = self.path.current + 1
@@ -194,7 +199,7 @@ A unit with 10 effective strength carries anything with no penalty. A unit with 
 
 NEAREST-X RESOLUTION
 
-- Map resources (trees, herbs, berry bushes): scan outward from building position in expanding rings
+- Map resources (trees, herbs, berry bushes): flood fill outward from building position along pathable tiles, returning the nearest reachable target. Radius cap of 100 tiles — if no valid target is found within 100 tiles of flood fill expansion, the building has no valid target this scan.
 - Buildings (stockpiles, homes): linear scan of building list with distance comparison
 
 No spatial indexing needed at ~200 units and ~20-50 buildings.
@@ -219,6 +224,8 @@ DEAD-END RULE
 
 Every enclosed building has exactly one door. All other perimeter tiles are walls. A* never routes through buildings because there is no second exit. No cost penalty needed.
 
+**Perimeter F exception:** Buildings with impassable-terrain clearing (fishing dock on water, mines on rock) may have perimeter F tiles on the face adjacent to that clearing. The dead-end property holds naturally because the opening leads onto impassable terrain — A* cannot enter from that side.
+
 TILE MAP
 
 Each BuildingConfig defines a `tile_map` — a flat array of tile type strings read row by row, left to right, top to bottom:
@@ -234,7 +241,7 @@ bakery = {
 }
 ```
 
-Config validation asserts: exactly one D tile, all non-D perimeter tiles are W, all F/D tiles are contiguous and reachable from D, all layout positions fall on F or D tiles.
+Config validation asserts: exactly one D tile, all non-D perimeter tiles are W (unless the perimeter F exception applies — see Dead-End Rule), all F/D tiles are contiguous and reachable from D, all layout positions fall on F or D tiles. Solid buildings (`is_solid = true`) skip all of the above — their tile map is all W, they have no door, no layout positions, and no clearing.
 
 LAYOUT POSITIONS
 
@@ -251,8 +258,8 @@ bakery = {
 cottage = {
     layout = {
         beds = {
-            { x = 0, y = 0 }, { x = 2, y = 0 },
-            { x = 0, y = 1 }, { x = 2, y = 1 },
+            { x = 1, y = 1 }, { x = 3, y = 1 },
+            { x = 1, y = 2 }, { x = 3, y = 2 },
         },
     },
 }
@@ -262,15 +269,29 @@ CLEARING
 
 A strip of tiles 1 deep on the door face extending outward from the building. These are normal ground tiles — the building does not own them — but placement validation prevents other buildings' wall tiles from being placed on them. Clearing tiles from different buildings can overlap, allowing face-to-face placement with a shared walkable corridor.
 
+**Solid buildings** (`is_solid = true`) have no door and no clearing. Workers path adjacent-to-rect to reach them.
+
+**Impassable-terrain clearing:** Buildings with impassable-terrain placement (fishing dock on water, mines on rock) have an additional clearing strip on the back face (opposite the door). This clearing requires the appropriate impassable terrain type rather than pathable ground. Fishing docks have a 2-deep water clearing behind the back row. Mines have a 1-deep rock clearing behind the back row.
+
 ORIENTATION
 
-Four orientations: N/S/E/W. The tile map and layout positions are defined in one canonical orientation and rotated at construction time. The door face determines clearing direction.
+Four orientations: N/S/E/W. The tile map and layout positions are defined in one canonical orientation and rotated at construction time. The door face determines clearing direction. Player-sized buildings (stockpile, farm) and solid buildings (gathering hubs) have no orientation.
 
 PLACEMENT VALIDATION
 
 - All building tiles must be on pathable terrain (grass/dirt) unless a `placement` field overrides (e.g., `placement = "rock"`)
 - Clearing tiles must not overlap another building's wall tiles
 - The tile immediately outside the door must be pathable
+- **Perimeter F tiles** are only allowed on faces that have an impassable-terrain clearing — validation checks which face the tile is on and whether that face has such a clearing (derivable from the `placement` field)
+- **Unit occupancy:** any footprint tile with `target_of_unit ~= nil` or `#tile.unit_ids > 0` is invalid. This prevents buildings from being placed on tiles where units are standing or targeting, removing the need for units to escape blueprints in P1. Unit escape from blueprints is a Phase 2 consideration when construction behavior is redesigned.
+- **Solid buildings** (`is_solid = true`) have no door — all tiles are wall. Validation only requires all footprint tiles on pathable terrain.
+
+Edge buildings (fishing dock, mines) have row-based terrain constraints relative to orientation. The door face is "front," the opposite edge is "back":
+
+- Fishing dock: back row must be on water, front row must be on grass/dirt, middle rows can be any terrain. 2-deep water clearing behind back row.
+- Mines (iron, gold): back row must be on rock, front row must be on grass/dirt, middle rows can be any terrain.
+
+Edge buildings can transform impassable tiles (water, rock) into passable interior space when built.
 
 CONSTRUCTION STATE
 
@@ -282,11 +303,15 @@ BUILDINGS WITHOUT TILE MAPS
 
 **Farms:** Player-sized open passable area. No wall/floor model. See ECONOMY.md Frost and Farming for per-tile crop state and farm controls.
 
+SOLID BUILDINGS
+
+Gathering hubs (woodcutter's camp, gatherer's hut, herbalist's hut) are solid structures with `is_solid = true`. Their tile map is all W — no door, no interior, no layout positions. Workers never enter. They path adjacent-to-rect to the building when returning from gathering trips. No clearing is generated for solid buildings.
+
 PATHFINDING INTEGRATION
 
 `getTileCost` checks building tiles: if the tile belongs to a completed building and its tile map entry is W, impassable. If F or D, passable at BASE_MOVE_COST. Blueprints (not yet built) remain fully impassable for pathfinding, passable for path-following (existing behavior).
 
-**Escape case** (unchanged): If a unit starts A* on a tile belonging to a completed building, all tiles of that specific building are treated as passable for that query.
+**Escape case (Phase 2):** Not needed in P1 — placement validation prevents buildings on occupied tiles. See PATH STORAGE for Phase 2 notes.
 
 ## Plant System
 
