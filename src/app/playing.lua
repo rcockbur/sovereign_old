@@ -4,6 +4,8 @@
 local gamestate = require("app.gamestate")
 local world     = require("core.world")
 local time      = require("core.time")
+local camera    = require("ui.camera")
+local renderer  = require("ui.renderer")
 local log       = require("core.log")
 
 local playing = {}
@@ -13,6 +15,7 @@ local prev_hour
 function playing.enter()
     world.init()
     time.init()
+    camera.init()
     prev_hour = -1
 
     local settle = { grass=0, water=0, rock=0, tree=0, berry=0 }
@@ -43,6 +46,8 @@ function playing.enter()
 end
 
 function playing.update(dt)
+    camera.update(dt)
+
     local ticks = time.accumulate(dt)
     for _ = 1, ticks do
         time.advance()
@@ -58,6 +63,11 @@ end
 
 function playing.draw()
     love.graphics.setBackgroundColor(0.05, 0.07, 0.05)
+
+    love.graphics.push()
+    camera.applyTransform()
+    renderer.drawWorld()
+    love.graphics.pop()
 end
 
 function playing.keypressed(key)
@@ -81,6 +91,15 @@ function playing.keypressed(key)
 end
 
 function playing.mousepressed(x, y, button)
+    camera.mousepressed(x, y, button)
+end
+
+function playing.mousereleased(x, y, button)
+    camera.mousereleased(x, y, button)
+end
+
+function playing.wheelmoved(dx, dy)
+    camera.wheelmoved(dx, dy)
 end
 
 return playing

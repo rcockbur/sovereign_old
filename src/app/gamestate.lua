@@ -52,6 +52,14 @@ function gamestate:mousepressed(x, y, button)
     callHook("mousepressed", x, y, button)
 end
 
+function gamestate:mousereleased(x, y, button)
+    callHook("mousereleased", x, y, button)
+end
+
+function gamestate:wheelmoved(dx, dy)
+    callHook("wheelmoved", dx, dy)
+end
+
 function top()
     return stack[#stack]
 end

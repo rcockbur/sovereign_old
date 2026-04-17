@@ -3,6 +3,10 @@
 -- Debug keys (F1, Shift+F1, F3), mouse bindings, Escape, and modifier keys are hardcoded.
 
 Keybinds = {
+    pan_up             = "up",
+    pan_down           = "down",
+    pan_left           = "left",
+    pan_right          = "right",
     toggle_pause       = "space",
     speed_1            = "1",
     speed_2            = "2",

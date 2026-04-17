@@ -29,3 +29,11 @@ end
 function love.mousepressed(x, y, button)
     gamestate:mousepressed(x, y, button)
 end
+
+function love.mousereleased(x, y, button)
+    gamestate:mousereleased(x, y, button)
+end
+
+function love.wheelmoved(dx, dy)
+    gamestate:wheelmoved(dx, dy)
+end

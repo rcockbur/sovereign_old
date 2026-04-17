@@ -21,6 +21,9 @@
 - TPS tracking fields (`ticks_this_second`, `ticks_last_second`) moved to the `time` module table rather than `world.time` — transient, not serialized, accessible to dev overlay.
 - Initial generation constants were off by ~10× (simplex noise has approximately uniform distribution; thresholds were not set accordingly). Corrected before M05: water threshold 0.35→0.03, rock thresholds 0.72/0.65→0.975/0.93, tree thresholds 0.72/0.45→0.92/0.20.
 
+**M05**
+- Implemented without issue.
+
 ## Phase 1 Milestones
 
 Granular implementation milestones for Phase 1 (Survival). Claude Code implements these one at a time in order. Each milestone builds on the last — later milestones assume all earlier ones are complete.
