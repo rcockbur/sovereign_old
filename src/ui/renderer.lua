@@ -87,13 +87,39 @@ function renderer.drawUnits()
     end
 end
 
-function renderer.drawSelection(tile_idx)
-    if tile_idx == nil then return end
-    local x, y = tileXY(tile_idx)
-    local px   = (x - 1) * TILE_SIZE
-    local py   = (y - 1) * TILE_SIZE
-    love.graphics.setColor(1, 1, 1, 0.55)
-    love.graphics.rectangle("line", px, py, TILE_SIZE, TILE_SIZE)
+function renderer.drawSelection(selected, selected_type, tile_idx)
+    if selected == nil then return end
+    love.graphics.setColor(1, 1, 1, 0.7)
+
+    if selected_type == "unit" then
+        local ts   = TILE_SIZE
+        local half = ts * 0.5
+        local r    = half * 0.4
+        local u    = selected
+        local px   = (u.x - 1) * ts + half
+        local py   = (u.y - 1) * ts + half
+
+        if u.path ~= nil then
+            local next_idx  = u.path.tiles[u.path.current]
+            local nx, ny    = tileXY(next_idx)
+            local tile_cost = world.getTileCost(world.tiles[next_idx])
+            if tile_cost ~= nil then
+                local dx = math.abs(nx - u.x)
+                local dy = math.abs(ny - u.y)
+                if dx == 1 and dy == 1 then tile_cost = tile_cost * SQRT2 end
+                local lerp_t = math.min(u.move_progress / tile_cost, 1.0)
+                px = px + (nx - u.x) * ts * lerp_t
+                py = py + (ny - u.y) * ts * lerp_t
+            end
+        end
+
+        love.graphics.circle("line", px, py, r + 3)
+    else
+        local x, y = tileXY(tile_idx)
+        local px   = (x - 1) * TILE_SIZE
+        local py   = (y - 1) * TILE_SIZE
+        love.graphics.rectangle("line", px, py, TILE_SIZE, TILE_SIZE)
+    end
 end
 
 return renderer

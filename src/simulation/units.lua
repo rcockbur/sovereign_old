@@ -11,10 +11,6 @@ local units = {}
 local Unit = {}
 Unit.__index = Unit
 
-function Unit:getAttribute(key)
-    return self.base_attributes[key] + self.acquired_attributes[key]
-end
-
 function units.spawnSerf(x, y)
     local tile_idx = tileIndex(x, y)
     local t = world.tiles[tile_idx]
@@ -101,12 +97,10 @@ end
 
 local FLOOD_DIRS = { {0,-1}, {0,1}, {-1,0}, {1,0} }
 
--- Recalculate move_speed. Currently always 1.0; carry weight penalty wired in M13/M15.
 function Unit:recalcMoveSpeed()
     self.move_speed = 1.0
 end
 
--- Per-tick movement step: advance move_progress, transition tile when cost is met.
 function Unit:moveStep()
     if self.path == nil then return end
     if self.path.current > #self.path.tiles then
@@ -154,12 +148,10 @@ function Unit:moveStep()
     end
 end
 
--- Per-tick update for one unit.
 function Unit:tick()
     self:moveStep()
 end
 
--- Tick all living units.
 function units.tickAll()
     for i = 1, #world.units do
         local unit = world.units[i]
@@ -169,7 +161,6 @@ function units.tickAll()
     end
 end
 
--- Claim destination, release old target, run A*. Returns true on success.
 function units.startMove(unit, goal_idx)
     local goal_tile = world.tiles[goal_idx]
     if world.getTileCost(goal_tile) == nil then return false end
@@ -198,7 +189,6 @@ function units.startMove(unit, goal_idx)
     return true
 end
 
--- Flood-fill outward from unit's current tile to find the nearest free target tile.
 function units.floodFillNearest(unit)
     local start_idx = tileIndex(unit.x, unit.y)
     local queue     = { start_idx }

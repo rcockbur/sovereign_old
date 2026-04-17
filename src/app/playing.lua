@@ -33,7 +33,7 @@ function playing.draw()
     camera.applyTransform()
     renderer.drawWorld()
     renderer.drawUnits()
-    renderer.drawSelection(hub.selected_tile)
+    renderer.drawSelection(hub.selected, hub.selected_type, hub.selected_tile)
     love.graphics.pop()
 
     hub.draw()
