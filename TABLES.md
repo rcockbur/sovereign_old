@@ -1,5 +1,5 @@
 # Sovereign — TABLES.md
-*v5 · Reference data: game entity data structures, config tables, and production chains.*
+*v19 · Reference data: game entity data structures, config tables, and production chains.*
 
 ## Data Structures
 
@@ -7,10 +7,10 @@ UNIT
 
 ```lua
 unit = {
-    id = 0, name = "", gender = "male", class = "serf",
+    id = 0, name = "", surname = "", gender = "male", class = "serf",
     is_dead = false,
     is_drafted = false,
-    draft_target = nil,         -- { x, y } assigned by command system
+    draft_tile = nil,           -- flat index assigned by command system
     age = 0,                    -- life-years (increments once per season)
     birth_day = 0, birth_season = 0,
     death_age = 0,              -- predetermined at birth, bell curve around ~60
@@ -34,7 +34,7 @@ unit = {
     genetic_attributes = {
         strength = 0, intelligence = 0, charisma = 0,
     },
-    natural_attributes = {
+    base_attributes = {
         strength = 1, intelligence = 1, charisma = 1,
     },
     acquired_attributes = {
@@ -43,21 +43,24 @@ unit = {
     skills = {
         -- All units get all keys at 0. Only specialty freemen/clergy grow skills.
         smithing = 0, smelting = 0, tailoring = 0,
-        baking = 0, brewing = 0, scholarship = 0, research = 0,
+        baking = 0, brewing = 0, teaching = 0, research = 0,
         medicine = 0, priesthood = 0, barkeeping = 0,
         trading = 0,
     },
     skill_progress = {
         -- Per-skill progress toward next level. Mirrors skills keys.
-        -- Accumulates 1 per tick during specialty work activity.
+        -- Accumulates 1 per tick during specialty work action.
         -- Threshold: skill_level_ticks * (current_skill + 1). Resets on level-up.
         smithing = 0, smelting = 0, tailoring = 0,
-        baking = 0, brewing = 0, scholarship = 0, research = 0,
+        baking = 0, brewing = 0, teaching = 0, research = 0,
         medicine = 0, priesthood = 0, barkeeping = 0,
         trading = 0,
     },
     needs = {
         satiation = 100, energy = 100, recreation = 100,
+        -- Recreation is a mood meter, not a behavioral interrupt.
+        -- Drains while awake and not recreating. Recovers during recreation activities.
+        -- Does not drain during sleep. See BEHAVIOR.md Work Day and Recreation.
     },
 
     mood = 0,
@@ -73,12 +76,17 @@ unit = {
     carrying = {},          -- flat array of entity ids (single resource type; see BEHAVIOR.md Carrying)
     claimed_tile = nil,     -- tileIndex of claimed resource tile, or nil
 
-    job_id = nil,                   -- primary job (unskilled for serfs, specialty for freemen/clergy)
-    secondary_haul_job_id = nil,    -- private self-posted haul job for self-fetch/deposit; tracks reservations for cleanup
-    current_activity = nil,         -- { type = "travel"|"work"|"wait"|"idle", ... }
-    soft_interrupt_pending = false, -- set by per-hash soft interrupt check, consumed by onActivityComplete
+    activity_id = nil,                   -- primary activity (unskilled for serfs, specialty for freemen/clergy)
+    secondary_haul_activity_id = nil,    -- private self-posted haul activity for self-fetch/deposit; tracks reservations for cleanup
+    current_action = nil,          -- { type = "travel"|"work"|"sleep"|"idle", ... }
+    soft_interrupt_pending = false, -- set by per-hash soft interrupt check, consumed by onActionComplete
     home_id = nil,                  -- building id of housing building
     bed_index = nil,                -- index into home building's housing.beds array, or nil
+
+    -- Work day (see BEHAVIOR.md Work Day and Recreation)
+    work_hours = 11,                    -- configurable 10/11/12 by player
+    work_ticks_remaining = 0,           -- decrements during work-related states; reset at WORK_DAY_RESET_HOUR
+    is_done_working = false,            -- true when work_ticks_remaining hits 0; reset at WORK_DAY_RESET_HOUR
     x = 0, y = 0,
     target_tile = nil,      -- tileIndex of destination (moving) or standing position (stationary)
 
@@ -99,7 +107,7 @@ unit = {
 
 ```lua
 function unit:getAttribute(key)
-    return self.natural_attributes[key] + self.acquired_attributes[key]
+    return self.base_attributes[key] + self.acquired_attributes[key]
 end
 
 function unit:carryableAmount(type)
@@ -108,15 +116,15 @@ function unit:carryableAmount(type)
 end
 ```
 
-**Attributes** use three tables. `genetic_attributes` are derived from parents at birth and represent the growth target — capped at `genetic_attribute_max` (7), never change after birth. `natural_attributes` track current genetic growth, starting at `{1,1,1}` and growing toward `genetic_attributes` by adulthood. `acquired_attributes` are environmental bonuses, capped at `acquired_attribute_max` (3) per attribute. Effective attribute = `unit:getAttribute(key)` = `natural + acquired`. Max effective value is 10. Parent derivation formula and childhood growth curve are pending design (Phase 5).
+**Attributes** use three tables. `genetic_attributes` are derived from parents at birth and represent the growth target — capped at `genetic_attribute_max` (7), never change after birth. `base_attributes` track current genetic growth, starting at `{1,1,1}` and growing toward `genetic_attributes` by adulthood. `acquired_attributes` are environmental bonuses, capped at `acquired_attribute_max` (3) per attribute. Effective attribute = `unit:getAttribute(key)` = `base + acquired`. Max effective value is 10. Parent derivation formula and childhood growth curve are pending design (Phase 5).
 
-**Equipment:** Units wear individual items (tools, clothing). Each equipped slot holds an item entity id referencing a first-class item entity in the registry. Units self-fetch equipment from the nearest stockpile or barn when missing a wanted item, preferring higher-quality variants (e.g., steel_tools over iron_tools). See BEHAVIOR.md Equipment Wants. Items degrade over time — tools drain durability per tick during work, clothing drains per tick while awake. When durability reaches 0, the item is destroyed and removed from the registry (resource counts updated via `equipped` category). The unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning. Additional equipped slots (jewelry, weapon, armor) arrive in later phases.
+**Equipment:** Units wear individual items (tools, clothing). Each equipped slot holds an item entity id referencing a first-class item entity in the registry. Units self-fetch equipment from the nearest stockpile or barn when missing a wanted item, preferring higher-quality variants (e.g., steel_tools over iron_tools — ranking mechanism pending, see DESIGN.md Phase 2). See BEHAVIOR.md Equipment Wants. Items degrade over time — see ECONOMY.md Item for drain rules. When durability reaches 0, the item is destroyed (resource counts updated via `equipped` category) and the unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning. Additional equipped slots (jewelry, weapon, armor) arrive in later phases.
 
 MEMORY (DEAD UNIT)
 
 ```lua
 memory = {
-    id = 0, name = "",
+    id = 0, name = "", surname = "",
     father_id = nil, mother_id = nil,
     child_ids = {}, spouse_id = nil,
     death_day = 0, death_season = 0, death_year = 0,
@@ -142,31 +150,32 @@ tile = {
 }
 ```
 
-JOB (UNIFIED STRUCTURE)
+ACTIVITY (UNIFIED STRUCTURE)
 
 ```lua
-job = {
+activity = {
     id = 0,
-    type = "woodcutter",     -- keys into JobTypeConfig, or "haul"
-    claimed_by = nil,
+    type = "woodcutter",     -- keys into ActivityTypeConfig, or "haul"
+    purpose = "work",        -- "work" | "interrupt" | "recreation"
+    worker_id = nil,
     posted_tick = 0,
 
-    -- Regular job fields (nil for hauling)
+    -- Regular activity fields (nil for hauling)
     x = 0, y = 0,
-    target_id = nil,         -- building id where work is performed
+    workplace_id = nil,      -- building id where work is performed
     progress = 0,
 
-    -- Hauling job fields (nil for regular)
-    resource = nil,
+    -- Hauling activity fields (nil for regular)
+    resource_type = nil,
     source_id = nil,         -- building id, ground pile id, or nil (unit is carrying)
     destination_id = nil,    -- building id
-    is_private = false,      -- true for self-posted jobs (self-fetch, self-deposit, merchant delivery)
+    is_private = false,      -- true for self-posted activities (self-fetch, self-deposit, merchant delivery)
 }
 ```
 
-Job types are keys from JobTypeConfig (woodcutter, baker, farmer, etc.) or `"haul"` for hauling jobs. Public haul jobs are scored by distance to source and job age. Private haul jobs (`is_private = true`) are posted and claimed atomically by the same unit — they never appear in the job queue for other units. They exist for reservation tracking and cleanup.
+`type` keys into ActivityTypeConfig, or `"haul"` for hauling activities. `purpose` classifies the activity — see BEHAVIOR.md for how purpose interacts with the work day counter. `is_private` marks self-posted activities — see ECONOMY.md Reservation System for the private/public distinction.
 
-Buildings post jobs when they have work available and `#posted_job_ids < worker_limit`. All building-posted jobs (operational, build, construction haul) are tracked in `building.posted_job_ids`. The job's `target_id` references the building. When a worker claims the job, they path to the building and work. When the job completes or the worker leaves, the building may post a new job.
+Buildings post activities when they have work available and `#posted_activity_ids < worker_limit`. All building-posted activities (operational, build, construction haul) are tracked in `building.posted_activity_ids`. The activity's `workplace_id` references the building. When a worker claims the activity, they path to the building and work. When the activity completes or the worker leaves, the building may post a new activity.
 
 PRODUCTION ORDER
 
@@ -201,10 +210,10 @@ building = {
     category = "housing",    -- "storage" | "housing" | "farming" | "gathering" | "extraction" | "processing" | "service"
     x = 0, y = 0, width = 0, height = 0,
     orientation = "S",       -- "N" | "S" | "E" | "W" — door facing direction (nil for player-sized and solid buildings)
-    is_built = false,
+    phase = "constructing",  -- "blueprint" | "constructing" | "complete"
     is_deleted = false,      -- flagged for deletion, swept at end of tick
 
-    -- Construction (present only while is_built == false, nil after completion)
+    -- Construction (present only while phase ~= "complete", nil after completion)
     construction = {
         bins = {},           -- array of bins (container_type = "bin"): { type, capacity, contents, reserved_in, reserved_out }
                              -- one bin per build_cost type, capacity = exact required amount
@@ -212,9 +221,9 @@ building = {
         progress = 0,        -- ticks of work completed
     },
 
-    -- Job tracking (all buildings)
-    posted_job_ids = {},     -- every job this building posted (operational, build, construction haul)
-                             -- used for staffing check (#posted_job_ids < worker_limit) and deletion cleanup
+    -- Activity tracking (all buildings)
+    posted_activity_ids = {},     -- every activity this building posted (operational, build, construction haul)
+                             -- used for staffing check (#posted_activity_ids < worker_limit) and deletion cleanup
 
     -- Workforce (non-housing buildings only)
     worker_limit = 0,        -- player-adjustable; capped at max_workers from BuildingConfig
@@ -264,7 +273,7 @@ building = {
 
 **`worker_limit` vs `max_workers`:** `max_workers` in BuildingConfig is the design-time ceiling. `worker_limit` on the runtime building is the player-adjustable value, defaulting to `max_workers` on construction. The player can lower `worker_limit` but never raise it above `max_workers`.
 
-**`posted_job_ids` vs `worker_limit`:** `posted_job_ids` tracks every job the building has posted — both claimed and unclaimed. The job-posting condition is `#posted_job_ids < worker_limit`. This correctly reflects staffing even when workers are physically away from the building (gathering, self-fetching, self-depositing). A worker who leaves to self-fetch still holds a claimed job in `posted_job_ids`, so the building does not double-post. Jobs are added to `posted_job_ids` on posting and removed on job completion, cancellation, or building deletion.
+**`posted_activity_ids` vs `worker_limit`:** `posted_activity_ids` tracks every activity the building has posted — both claimed and unclaimed. The activity-posting condition is `#posted_activity_ids < worker_limit`. This correctly reflects staffing even when workers are physically away from the building (gathering, self-fetching, self-depositing). A worker who leaves to self-fetch still holds a claimed activity in `posted_activity_ids`, so the building does not double-post. Activities are added to `posted_activity_ids` on posting and removed on activity completion, cancellation, or building deletion.
 
 **Building categories and valid sub-tables:**
 
@@ -278,9 +287,9 @@ building = {
 | processing | `production` |
 | service | building-specific fields (`max_students`, `market`, etc.) |
 
-Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `is_built`, `is_deleted`, `posted_job_ids`. Under construction: `construction` sub-table. Non-housing buildings additionally have `worker_limit`. Player-sized buildings and solid buildings have no `orientation`.
+Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `phase`, `is_deleted`, `posted_activity_ids`. Constructing: `construction` sub-table. Non-housing buildings additionally have `worker_limit`. Player-sized buildings and solid buildings have no `orientation`.
 
-**Construction:** Building placement creates a building entity with `is_built = false` and populates a `construction` sub-table. See BEHAVIOR.md Construction Work Cycle for the full behavioral sequence.
+**Construction:** Building placement creates a building entity with `phase = "complete"` (P1, instant placement — no construction sub-table) or `phase = "constructing"` / `"blueprint"` (P2, when the construction system comes online) and populates a `construction` sub-table. See BEHAVIOR.md Construction Work Cycle for the full behavioral sequence.
 
 **Building deletion:** The player marks a building for deletion by setting `is_deleted = true`. Deletion is processed at end of tick in `buildings.sweepDeleted`, after `units.sweepDead`. See BEHAVIOR.md Building Deletion for the full cleanup sequence.
 
@@ -290,13 +299,9 @@ Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `he
 
 **Crop change:** Changing crop destroys planted tiles. See ECONOMY.md Farm Controls.
 
-**Extraction:** No depletion. See BEHAVIOR.md Gathering Work Cycle.
+**Extraction:** No depletion. See BEHAVIOR.md Extraction Work Cycle.
 
-**Stockpile filters:** Player-configurable per-type filters with three modes: reject, accept, and get. See ECONOMY.md Storage Filter System for filter semantics, pull mechanics, and per-tile capacity.
-
-**Warehouse constraints:** Warehouses use the same filter system as stockpiles but only accept stackable resources (enforced by `is_stackable_only` in BuildingConfig — filter table is populated with stackable types only). Total weight capacity from BuildingConfig.
-
-**Barn constraints:** Barns only accept non-stackable items (enforced by `is_items_only` in BuildingConfig — filter table is populated with item types only). No tile representation — the player interacts via a panel UI showing item icons. Capacity is a flat item count (`item_capacity`), not tile-based.
+**Storage filter system and container type constraints** (stockpile/warehouse/barn): see ECONOMY.md Storage Filter System and Containers.
 
 WORLD
 
@@ -310,7 +315,7 @@ world = {
     -- All entity arrays (world owns all game state)
     units = {},
     buildings = {},
-    jobs = {},
+    activities = {},
     stacks = {},
     items = {},
     ground_piles = {},
@@ -319,15 +324,15 @@ world = {
     spread_cursor = 0,
     growing_plant_data = {},
 
-    -- Resource counts (maintained by resources module — see ECONOMY.md Resource Counts)
+    -- Resource counts — see ECONOMY.md Resource Counts for category definitions and maintenance rules
     resource_counts = {
-        storage = {},           -- stockpiles, warehouses, barns: { [type] = amount }
-        storage_reserved = {},  -- reserved_out across all storage: { [type] = amount }
-        processing = {},        -- processing building input bins
-        housing = {},           -- housing bins (food only)
-        carrying = {},          -- unit.carrying
-        equipped = {},          -- unit.equipped
-        ground = {},            -- ground piles
+        storage = {},
+        storage_reserved = {},
+        processing = {},
+        housing = {},
+        carrying = {},
+        equipped = {},
+        ground = {},
     },
 
     -- Game state (formerly standalone modules)
@@ -357,10 +362,10 @@ world = {
     },
 
     settings = {
+        settlement_name   = "",        -- randomly generated on new game
         combat_gender     = "male",    -- "male" | "both" | "female"
         clergy_gender     = "male",    -- "male" | "both" | "female"
         succession_priority = "male",  -- "male" | "both" | "female"
-        witch_gender      = "female",  -- "female" | "both" | "male"
     },
 }
 ```
@@ -371,32 +376,33 @@ A season is 7 days. `game_day` (1–7) is both the day-of-season and the weekday
 
 ```lua
 -- Three needs tiers: meager (serfs), standard (freemen, priests), luxurious (gentry, bishops).
--- Satiation is uniform across all tiers. Energy and recreation differ — higher tiers are needier.
+-- Satiation is uniform across all tiers. Energy differs by tier for mood (higher tiers are
+-- unhappier when tired). Recreation: mood meter, not a behavioral interrupt (see BEHAVIOR.md
+-- Work Day and Recreation); only mood_threshold and mood_penalty live here per tier.
 -- Lookup: NeedsConfig[unit.needs_tier]
 --
 -- Energy is uniform across all tiers for drain and hard_threshold. The soft threshold for
 -- energy is time-of-day rather than per-tier — see SleepConfig and BEHAVIOR.md Sleep.
--- mood_threshold and mood_penalty for energy still differ per tier (higher tiers are unhappier
--- when tired).
+-- Satiation soft_threshold is flat at 75 (not time-varying). See BEHAVIOR.md Need Interrupts.
 NeedsConfig = {
     meager = {
-        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 50, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
+        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 75, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
         energy     = { drain = 4 * PER_HOUR,                      hard_threshold = 10, mood_threshold = 30, mood_penalty = -10 },
-        recreation = { drain = 1 * PER_HOUR, soft_threshold = 40, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
+        recreation = { mood_threshold = 30, mood_penalty = -10 },
     },
     standard = {
-        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 50, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
+        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 75, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
         energy     = { drain = 4 * PER_HOUR,                      hard_threshold = 10, mood_threshold = 50, mood_penalty = -15 },
-        recreation = { drain = 2 * PER_HOUR, soft_threshold = 50, hard_threshold = 20, mood_threshold = 50, mood_penalty = -15 },
+        recreation = { mood_threshold = 50, mood_penalty = -15 },
     },
     luxurious = {
-        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 50, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
+        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 75, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
         energy     = { drain = 4 * PER_HOUR,                      hard_threshold = 10, mood_threshold = 60, mood_penalty = -20 },
-        recreation = { drain = 4 * PER_HOUR, soft_threshold = 60, hard_threshold = 25, mood_threshold = 60, mood_penalty = -20 },
+        recreation = { mood_threshold = 60, mood_penalty = -20 },
     },
 }
 
--- Sleep mechanics. Recovery is the per-tick energy gain while in the sleep wait activity.
+-- Sleep mechanics. Recovery is the per-tick energy gain while in the sleep action.
 -- Soft and wake thresholds vary by time of day — looked up via time.getEnergyThresholds().
 -- Four periods divide the day (constants in CLAUDE.md):
 --   Night    NIGHT_START → MORNING_START      flat night values
@@ -409,6 +415,15 @@ SleepConfig = {
     recovery_rate = 8 * PER_HOUR,
     night = { soft = 50, wake = 100 },
     day   = { soft = 20, wake = 85  },
+}
+
+-- Recreation: mood meter, not a behavioral interrupt. See BEHAVIOR.md Work Day and Recreation.
+-- Mood thresholds live in NeedsConfig per tier.
+RecreationConfig = {
+    work_drain      = 4.55 * PER_HOUR,    -- drains while awake and not recreating
+    recovery_rate   = 10 * PER_HOUR,       -- base rate; subject to diminishing returns
+    -- Diminishing returns formula TBD during tuning. Effective recovery =
+    -- recovery_rate * diminishing_factor(current_recreation).
 }
 
 -- Children use their class's needs tier (no separate child profile).
@@ -437,26 +452,31 @@ HousingBinConfig = {
     { type = "fish",        capacity = 128 },
 }
 
--- Unified job type config. is_specialty = false means any serf can do it.
+ActivityConfig = {
+    age_weight = 0.2,   -- score = age_weight * (current_tick - posted_tick) - manhattan_distance
+                        -- 5 ticks of waiting = 1 tile of extra reach
+}
+
+-- Unified activity type config. is_specialty = false means any serf can do it.
 -- is_specialty = true means only a freeman/clergy with matching unit.specialty.
 --
 -- work_source determines where work_ticks comes from:
 --   "plant"  — PlantConfig[plant_type].harvest_ticks (woodcutter, gatherer, herbalist)
 --   "recipe" — RecipeConfig[recipe].work_ticks (miller, baker, brewer, tailor, smith, smelter)
 --   "crop"   — CropConfig[crop].plant_ticks or .harvest_ticks depending on current work (farmer)
---   "job"    — work_ticks on this JobTypeConfig entry (iron_miner, stonecutter, fisher)
+--   "activity"    — work_ticks on this ActivityTypeConfig entry (iron_miner, stonecutter, fisher)
 --   "target" — target building's build_ticks (builder)
 --   nil      — no work_ticks, ongoing service (hauler, priest, bishop, teacher, barkeep, merchant, physician)
-JobTypeConfig = {
+ActivityTypeConfig = {
     -- Unskilled (any serf)
     hauler       = { is_specialty = false, attribute = "strength" },
     woodcutter   = { is_specialty = false, attribute = "strength",     work_source = "plant" },
-    iron_miner   = { is_specialty = false, attribute = "strength",     work_source = "job", work_ticks = 2 * TICKS_PER_HOUR },
-    stonecutter  = { is_specialty = false, attribute = "strength",     work_source = "job", work_ticks = 2 * TICKS_PER_HOUR },
+    iron_miner   = { is_specialty = false, attribute = "strength",     work_source = "activity", work_ticks = 2 * TICKS_PER_HOUR },
+    stonecutter  = { is_specialty = false, attribute = "strength",     work_source = "activity", work_ticks = 2 * TICKS_PER_HOUR },
     miller       = { is_specialty = false, attribute = "strength",     work_source = "recipe" },
     builder      = { is_specialty = false, attribute = "intelligence", work_source = "target" },
     farmer       = { is_specialty = false, attribute = "intelligence", work_source = "crop" },
-    fisher       = { is_specialty = false, attribute = "intelligence", work_source = "job", work_ticks = 2 * TICKS_PER_HOUR },
+    fisher       = { is_specialty = false, attribute = "intelligence", work_source = "activity", work_ticks = 2 * TICKS_PER_HOUR },
     gatherer     = { is_specialty = false, attribute = "intelligence", work_source = "plant" },
     herbalist    = { is_specialty = false, attribute = "intelligence", work_source = "plant" },
 
@@ -466,7 +486,7 @@ JobTypeConfig = {
     tailor       = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "tailoring",    max_skill = 10, work_source = "recipe" },
     baker        = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "baking",       max_skill = 10, work_source = "recipe" },
     brewer       = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "brewing",      max_skill = 10, work_source = "recipe" },
-    teacher      = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "scholarship",  max_skill = 10 },
+    teacher      = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "teaching",     max_skill = 10 },
     scholar      = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "research",     max_skill = 10 },
     physician    = { is_specialty = true, class = "freeman", attribute = "intelligence", skill = "medicine",     max_skill = 10 },
     barkeep      = { is_specialty = true, class = "freeman", attribute = "charisma",     skill = "barkeeping",   max_skill = 10 },
@@ -477,7 +497,7 @@ JobTypeConfig = {
     bishop       = { is_specialty = true, class = "clergy",  attribute = "charisma",     skill = "priesthood",   max_skill = 10 },
 }
 
-SerfChildJobs = { "hauler", "farmer", "gatherer", "fisher" }
+SerfChildActivities = { "hauler", "farmer", "gatherer", "fisher" }
 
 RecipeConfig = {
     flour           = { input = { wheat = 1 },              output = { flour = 1 },           work_ticks = 30 * TICKS_PER_MINUTE },
@@ -490,10 +510,10 @@ RecipeConfig = {
 }
 
 GrowthConfig = {
-    -- Skill growth: progress accumulates per tick during specialty work activity.
+    -- Skill growth: progress accumulates per tick during specialty work action.
     -- Threshold to reach next level = skill_level_ticks * (current_skill + 1).
     -- On reaching threshold: skill increments by 1, progress resets to 0.
-    -- Growth stops at max_skill from JobTypeConfig.
+    -- Growth stops at max_skill from ActivityTypeConfig.
     -- Mastery (skill 10) takes ~35 seasons of dedicated work (~age 51 if promoted at 16).
     skill_level_ticks = 70000,
 
@@ -520,6 +540,8 @@ MoodModifierConfig = {
     has_clothing          =   5,
     no_clothing           = -15,
     low_health            = -10,        -- applied when health < 50
+    -- Recreation mood penalty uses NeedsConfig[tier].recreation.mood_threshold and mood_penalty.
+    -- Applied when recreation < mood_threshold. No bonus for high recreation.
 
     -- Stored modifiers (event-driven, with ticks_remaining)
     family_death          = { value = -20, duration = 14 * TICKS_PER_DAY },
@@ -729,20 +751,18 @@ BuildingConfig = {
     -- Per-tile state: planted_tick (set when farmer finishes planting). Maturity derived.
     farm = {
         category = "farming",
-        is_open = true,
         is_player_sized = true,
         build_cost = { wood = 10 },
         build_ticks_per_tile = 15 * TICKS_PER_MINUTE,
         max_workers = 4,
-        job_type = "farmer",
+        activity_type = "farmer",
         -- crop set by player: "wheat" | "barley" | "flax" | nil (fallow)
         -- per-crop plant_ticks, harvest_ticks, growth_ticks, and yield_per_tile live in CropConfig
         -- farm controls: allow_planting (toggle), auto_harvest (off/per_tile/per_farm), "Harvest Now" button
     },
 
-    -- Hub gathering (workers cycle: hub → resource → hub)
-    -- Solid buildings — workers never enter, path adjacent-to-rect. No door, no clearing.
-    -- Job posting gated on unclaimed valid target count (see BEHAVIOR.md Gathering Work Cycle).
+    -- Hub gathering (see WORLD.md Solid Buildings)
+    -- Activity posting gated on unclaimed valid target count (see BEHAVIOR.md Gathering Work Cycle).
     woodcutters_camp = {
         category = "gathering",
         is_solid = true,
@@ -750,7 +770,7 @@ BuildingConfig = {
         build_cost = { wood = 20 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
-        job_type = "woodcutter",
+        activity_type = "woodcutter",
         tile_map = {
             "W", "W",
             "W", "W",
@@ -764,7 +784,7 @@ BuildingConfig = {
         build_cost = { wood = 15 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
-        job_type = "gatherer",
+        activity_type = "gatherer",
         tile_map = {
             "W", "W",
             "W", "W",
@@ -778,7 +798,7 @@ BuildingConfig = {
         build_cost = { wood = 15 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
-        job_type = "herbalist",
+        activity_type = "herbalist",
         tile_map = {
             "W", "W",
             "W", "W",
@@ -793,18 +813,18 @@ BuildingConfig = {
         build_cost = { wood = 20 },
         build_ticks = 6 * TICKS_PER_HOUR,
         placement = "water",
-        max_workers = 4,
-        job_type = "fisher",
+        max_workers = 3,
+        activity_type = "fisher",
         tile_map = {
-            "W", "F", "W",
+            "F", "F", "F",
             "W", "F", "W",
             "W", "D", "W",
         },
         layout = {
-            workstation = { x = 1, y = 0 },
+            workstation = { { x = 0, y = 0 }, { x = 1, y = 0 }, { x = 2, y = 0 } },
         },
         -- Back row on water, front row on grass/dirt. 2-deep water clearing behind back row.
-        -- Back-row perimeter F tile allowed per perimeter F exception (see WORLD.md Dead-End Rule).
+        -- Back-row perimeter F tiles allowed per perimeter F exception (see WORLD.md Dead-End Rule).
     },
     iron_mine = {
         category = "extraction",
@@ -813,7 +833,7 @@ BuildingConfig = {
         build_ticks = 10 * TICKS_PER_HOUR,
         placement = "rock",
         max_workers = 4,
-        job_type = "iron_miner",
+        activity_type = "iron_miner",
         tile_map = {},   -- TBD
         layout = {},     -- TBD
     },
@@ -824,7 +844,7 @@ BuildingConfig = {
         build_ticks = 10 * TICKS_PER_HOUR,
         placement = "rock",
         max_workers = 4,
-        job_type = "stonecutter",
+        activity_type = "stonecutter",
         tile_map = {},   -- TBD
         layout = {},     -- TBD
     },
@@ -836,7 +856,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        job_type = "miller",
+        activity_type = "miller",
         recipes = { "flour" },
         default_production_orders = {
             { recipe = "flour", is_standing = true, amount = -1 },
@@ -853,7 +873,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        job_type = "baker",
+        activity_type = "baker",
         recipes = { "bread" },
         default_production_orders = {
             { recipe = "bread", is_standing = true, amount = -1 },
@@ -870,7 +890,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        job_type = "brewer",
+        activity_type = "brewer",
         recipes = { "beer" },
         default_production_orders = {
             { recipe = "beer", is_standing = true, amount = -1 },
@@ -887,7 +907,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        job_type = "tailor",
+        activity_type = "tailor",
         recipes = { "plain_clothing" },
         default_production_orders = {
             { recipe = "plain_clothing", is_standing = true, amount = -1 },
@@ -904,14 +924,13 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 40 },
         build_ticks = 12 * TICKS_PER_HOUR,
         max_workers = 1,
-        job_type = "smith",
-        recipes = { "iron_tools", "steel_tools" },
+        activity_type = "smith",
+        recipes = { "iron_tools" },       -- Phase 3 adds "steel_tools" and a steel input bin
         default_production_orders = {
             { recipe = "iron_tools", is_standing = true, amount = -1 },
         },
         input_bins = {
             { type = "iron", capacity = 128 },
-            { type = "steel", capacity = 128 },
         },
         tile_map = {},   -- TBD
         layout = {},     -- TBD
@@ -922,7 +941,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 40 },
         build_ticks = 12 * TICKS_PER_HOUR,
         max_workers = 1,
-        job_type = "smelter",
+        activity_type = "smelter",
         recipes = { "steel" },
         default_production_orders = {
             { recipe = "steel", is_standing = true, amount = -1 },
@@ -942,7 +961,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        job_type = "merchant",
+        activity_type = "merchant",
         tile_map = {},   -- TBD
         layout = {},     -- TBD
         -- Runtime: market.last_delivered populated from MerchantConfig food type keys at construction
@@ -953,7 +972,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        job_type = "barkeep",
+        activity_type = "barkeep",
         tile_map = {},   -- TBD
         layout = {},     -- TBD: barkeep station + patron seats
         -- input/consumption mechanics pending (Phase 4)
@@ -964,11 +983,73 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        job_type = "physician",
+        activity_type = "physician",
         tile_map = {},   -- TBD
         layout = {},     -- TBD
     },
 }
 ```
 
-**Note on bloomery/smelter:** The building is `bloomery`, the job_type is `smelter`, and the skill is `smelting`. Smelting is a distinct skill from smithing.
+**Note on bloomery/smelter:** The building is `bloomery`, the activity_type is `smelter`, and the skill is `smelting`. Smelting is a distinct skill from smithing.
+
+```lua
+NameConfig = {
+    male = {
+        "Aldric", "Alfred", "Baldwin", "Beric", "Brand", "Cedric", "Colin",
+        "Conrad", "Edmund", "Edward", "Garrett", "Geoffrey", "Gilbert",
+        "Godwin", "Gunther", "Harold", "Henry", "Hugh", "Miles", "Oswin",
+        "Ralph", "Reynard", "Richard", "Robert", "Roger", "Roland", "Rolf",
+        "Thomas", "Walter", "William",
+    },
+    female = {
+        "Ada", "Agnes", "Alice", "Annette", "Astrid", "Aveline", "Beatrice",
+        "Brenna", "Cecily", "Constance", "Eleanor", "Elise", "Emma", "Freya",
+        "Greta", "Gwynn", "Hadley", "Hilda", "Ingrid", "Isabel", "Lena",
+        "Maren", "Margery", "Matilda", "Marta", "Millicent", "Roslyn",
+        "Seren", "Sigrid", "Wynna",
+    },
+    surname = {
+        "Aldham", "Aldren", "Barrow", "Breck", "Caskwell", "Corwin",
+        "Delling", "Dunbar", "Elsworth", "Falkner", "Fenwick", "Hale",
+        "Harren", "Hollis", "Kessler", "Langford", "Leclerc", "Merrick",
+        "Norwick", "Overton", "Pemberton", "Rathmore", "Selwyn", "Stroud",
+        "Talbot", "Voss", "Wardell", "Wyndham", "Yoren",
+    },
+}
+
+SettlementNameConfig = {
+    prefix = {
+        "Alder", "Amber", "Black", "Bramble", "Crow", "Elder", "Fen",
+        "Glen", "Hallow", "Holly", "Iron", "Meadow", "Oak", "Raven",
+        "Silver", "Stone", "Thorn", "Willow", "Winter",
+    },
+    suffix = {
+        "bridge", "crest", "dale", "fall", "field", "ford", "gate",
+        "glen", "haven", "holm", "keep", "march", "mere", "moor",
+        "ton", "vale", "watch", "wick", "wood",
+    },
+}
+```
+
+```lua
+-- Default keybindings. All non-debug hotkeys are remappable — the input handler checks
+-- Keybinds[action] instead of key literals. Debug keys (F1, Shift+F1, F3) are hardcoded.
+-- Mouse bindings, Escape, and modifier keys (Shift for multi-select / placement hold) are
+-- hardcoded — not part of this table.
+Keybinds = {
+    toggle_pause       = "space",
+    speed_1            = "1",
+    speed_2            = "2",
+    speed_3            = "3",
+    speed_4            = "4",
+    speed_5            = "5",
+    speed_6            = "6",
+    designate_chop     = "a",
+    designate_gather   = "s",
+    cancel_designation = "x",
+    rotate_building    = "tab",
+    delete_building    = "delete",
+    quicksave          = "f5",
+    quickload          = "f9",
+}
+```

@@ -1,15 +1,17 @@
 # FILES.md — Document System Reference
-*v3*
+*v6*
 
 ## Documents
 
 **CLAUDE.md** — Technical hub. Conventions, constants, architecture, dev tools, module ownership, serialization. Contains a routing table that maps technical topics to the domain files below. Always auto-loaded by Claude Code.
 
+**ROADMAP.md** — Project planning. Development phase scope and pending design items, implementation milestones, implementation state tracking. Claude Code reads this for milestone specs and updates implementation state here.
+
 **BEHAVIOR.md, ECONOMY.md, WORLD.md, TABLES.md** — Simulation files. Technical references for the game's model — everything that would exist in a headless run. See CLAUDE.md's technical routing table for what each file covers and where new content belongs.
 
 **UI.md** — UI file. Technical reference for the player interface — camera, input, layout, panels, selection, notifications. Everything that exists only because a player is watching and interacting.
 
-**DESIGN.md** — Player-facing design intent: pillars, setting, feature descriptions, phase definitions, the "why" behind gameplay decisions, pending design sections. No mechanical detail — cross-references the technical files for all specifics.
+**DESIGN.md** — Player-facing design intent: pillars, setting, feature descriptions, the "why" behind gameplay decisions. No mechanical detail — cross-references the technical files for all specifics. Phase overview only — full phase scope and pending items live in ROADMAP.md.
 
 **_BRAINSTORMING.md** — Loosely defined ideas, deferred systems, and speculative content. Not attached to the Claude project. Upload manually when the session topic requires it.
 
@@ -51,21 +53,21 @@ This table defines what DESIGN.md owns versus what the technical files own, per 
 
 | Topic | DESIGN.md owns (intent, player experience) | Technical files own (mechanics, rules, values) |
 |---|---|---|
-| Classes | Why four classes exist, social structure flavor, cost of elevation | Promotion rules, needs tiers, job filtering, children behavior |
-| Specialties | Career concept, player assigns specialties, dynamic work-finding as player experience | Skill growth formula, job queue polling, specialty revocation, job effectiveness |
+| Classes | Why four classes exist, social structure flavor, cost of elevation | Promotion rules, needs tiers, activity filtering, children behavior |
+| Specialties | Career concept, player assigns specialties, dynamic work-finding as player experience | Skill growth formula, activity queue polling, specialty revocation, activity effectiveness |
 | Needs | Three needs as pressure to stop working, starvation as failure mode | Drain rates, thresholds, interrupt firing conditions, availability gating |
 | Mood | Composite score concept, what drives it, productivity/deviancy consequences | Modifier values, threshold config, recalculation rules, food variety formula |
 | Health | Injury/illness/malnourishment as threats, death at 0 | Damage rates, recovery rates, illness config |
 | Economy | Production chain rationale, food fungibility, storage progression, storage filters as player tool, resource collection methods (designation vs building-based) | Resource entities, containers, reservations, resource counts, unit work cycles, self-fetch/deposit |
-| Designation | Bootstrap role, player's first tool, relationship to building-based gathering | Job posting, tile claiming, work cycle (BEHAVIOR.md), UI interaction (UI.md) |
-| Farming | Crop risk/reward tradeoffs, seasonal personality, harvest timing as player agency | Per-tile crop state, frost mechanics, farm controls, farm job posting, maturity formula |
-| Buildings | Interior spaces, rotation, housing types, construction as milestone, deletion consequences | Tile maps, layout positions, clearing, placement validation, construction state, pathfinding integration, deletion cleanup sequence |
+| Designation | Bootstrap role, player's first tool, relationship to building-based gathering | Activity posting, tile claiming, work cycle (BEHAVIOR.md), UI interaction (UI.md) |
+| Farming | Crop risk/reward tradeoffs, seasonal personality, harvest timing as player agency | Per-tile crop state, frost mechanics, farm controls, farm activity posting, maturity formula |
+| Buildings | Interior spaces, rotation, housing types, construction phases as player experience, site clearing, deletion consequences | Tile maps, layout positions, clearing, placement validation, construction phases, A* building exemption, pathfinding integration, site clearing activities, unit displacement, deletion cleanup sequence |
 | Storage | Stockpile/warehouse/barn progression and why each exists | Capacity values, filter system, container types, tile inventory vs stack/item inventory |
 | Merchant | Market as infrastructure milestone, food delivery concept, skill effect | Merchant loop, critical/standard runs, route order, drop amount, thresholds |
 | Map | Settlement vs forest, procedural generation from seed, forest as mysterious | Dimensions, terrain types, generation pipeline, forest depth formula |
 | Forest | Resource tiers by depth, atmosphere, inhabitants | Coverage percentages, plant types, growth/spread mechanics, movement costs |
 | Pathfinding | (not in DESIGN.md) | A*, tile costs, movement model, speed formula, collision |
-| Storage Filters | Storage filters as optional logistics tool, both playstyles work | Filter modes, pull mechanics, source resolution, cycle detection, job selection |
+| Storage Filters | Storage filters as optional logistics tool, both playstyles work | Filter modes, pull mechanics, source resolution, cycle detection, activity selection |
 | Dynasty | Leader as through-line, succession as drama, heir readiness | (succession traversal mechanics pending) |
 | Traits | Permanent tags, rarity, all have mechanical effects | (trait config values pending) |
 | Equipment | Degradation creates ongoing demand, units self-fetch | Equipment want checks, soft interrupt, fetch flow, durability drain |
@@ -73,6 +75,7 @@ This table defines what DESIGN.md owns versus what the technical files own, per 
 | Magic | Late-game emergence, divine vs arcane distinction, progression paths | Mana structures, unlock conditions, (spells/rates pending) |
 | Time | Seasonal cadence, player controls pacing, game start conditions | Constants, tick system, calendar derivation, frost day rolls |
 | Aging | Faster than real time, generational play | Aging constants, death age, seasonal aging |
+| Naming | Cultural flavor, surname inheritance reinforces dynasty | Name lists (TABLES.md), generation rules (CLAUDE.md) |
 
 ## Content Boundary: Between Technical Files
 

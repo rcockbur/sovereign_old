@@ -1,9 +1,9 @@
 # Sovereign — WORLD.md
-*v4 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
+*v12 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
 
 ## Map
 
-400x200 tile grid, 1-indexed. Columns 1–200 = settlement. Columns 201–400 = forest. `forest_depth` 0.0 in settlement, linear 0.0–1.0 in forest. `forest_danger = depth²`.
+400x200 tile grid, 1-indexed. Columns 1–200 = settlement. Columns 201–400 = forest. `forest_depth` 0.0 in settlement, linear 0.0–1.0 in forest.
 
 Terrain types: grass, dirt (both pathable), rock (impassable), water (impassable). Lakes only. No rivers. No elevation.
 
@@ -11,9 +11,9 @@ Tile grid stored as flat array using `tileIndex(x, y)`.
 
 FOREST COVERAGE
 
-Trees are dense in the forest (70–85% coverage at map gen) with natural clearings at all depths. The settlement area has sparse small clusters. Trees can be chopped down permanently — new trees come only from mature tree spreading.
+Trees are dense in the forest with natural clearings at all depths. The settlement area has sparse small clusters. Trees can be chopped down permanently — new trees come only from mature tree spreading.
 
-Three plant types are stored as tile data: tree, herb_bush, berry_bush. Each yields a distinct resource (wood, herbs, berries). Trees are permanent removal on chop; bushes regrow after gathering.
+Three plant types are stored as tile data: tree, herb_bush, berry_bush. Each yields a distinct resource (wood, herbs, berries). Trees are permanent removal on chop; bushes regrow after gathering. Berry bushes can also be **cleared** for permanent removal — see Plant System for clearing mechanics.
 
 Trees at stage 2+ significantly impede movement (see Pathfinding). Forest-native enemies are unaffected. Herb bushes and berry bushes never affect pathing.
 
@@ -90,7 +90,8 @@ TILE COSTS
 - Building wall tiles (W): impassable
 - Trees stage 2+: `BASE_MOVE_COST * TREE_MOVE_MULTIPLIER` (18 ticks). Trees slow movement but do not block pathing.
 - Rock, water: impassable
-- Blueprints (`building_id` set, `is_built == false`): impassable for pathfinding, passable for path-following (units with an existing path walk through)
+- Blueprint tiles (`phase == "blueprint"`): impassable unless the A* exemption applies (see A* Building Exemption)
+- Constructing tiles (`phase == "constructing"`): impassable
 - Diagonal movement allowed when both orthogonal neighbors are passable. Diagonal cost = √2 × destination tile cost.
 
 HEURISTIC
@@ -109,7 +110,7 @@ Two modes share the same A* core. The caller specifies the mode and the target; 
 
 **Destination mode:** Goal is a specific tile. A* terminates when the current node equals the destination. Heuristic uses octile distance to the destination. Used for: workstations, beds, home, storage pickup/deposit, move commands, idle tile search.
 
-**Adjacent-to-rect mode:** Goal is any unclaimed pathable orthogonal neighbor of a rectangle. A* terminates when the current node satisfies all three conditions: orthogonally adjacent to any tile in the rect, pathable, and `target_of_unit == nil`. Used for: tree chopping, berry gathering, herb gathering, construction delivery, construction building, and melee combat (Phase 5). A 1×1 rect is used for single-tile targets (trees, bushes), an NxM rect for buildings.
+**Adjacent-to-rect mode:** Goal is any unclaimed pathable orthogonal neighbor of a rectangle. A* terminates when the current node satisfies all three conditions: orthogonally adjacent to any tile in the rect, pathable, and `target_of_unit == nil`. Used for: tree chopping, berry gathering, herb gathering, construction delivery, construction building, site clearing (P2), and melee combat (Phase 9). A 1×1 rect is used for single-tile targets (trees, bushes), an NxM rect for buildings.
 
 Adjacent-to-rect heuristic uses octile distance to the nearest point on the rect, minus one tile:
 
@@ -126,6 +127,15 @@ This heuristic is admissible (never overestimates) but not tight for large rects
 
 If no tile satisfies the goal condition (all orthogonal neighbors are impassable or claimed), A* returns no path.
 
+A* BUILDING EXEMPTION
+
+A* accepts an optional `exempt_building_id` parameter. When set, all tiles belonging to that building are treated as pathable for that query regardless of building phase. This is a single mechanism that covers two cases:
+
+- **Blueprint clearing (P2):** A unit whose current position or A* target is on a blueprint's footprint needs to path through that blueprint's tiles (to clear obstructions or evacuate). The caller passes the blueprint's building id as the exemption.
+- **Escape from completed building (P2):** A unit that starts A* on a tile belonging to a completed building (e.g., after construction completes around them) needs to path out. The caller passes that building's id as the exemption.
+
+Units without the exemption cannot path through blueprint or building tiles. This prevents non-construction units from routing through blueprints while allowing clearing workers and evacuees to reach their targets.
+
 PATH STORAGE
 
 ```lua
@@ -133,8 +143,6 @@ unit.path = nil    -- { tiles = { idx1, idx2, ... }, current = 1 } or nil
 ```
 
 Unit advances `current` by 1 each movement step. When `current > #tiles`, the unit has arrived. If the next tile is blocked (building completed, new obstacle), clear the path and recompute.
-
-**Escape case (Phase 2):** In P1, placement validation prevents buildings from being placed on occupied tiles, so units never start inside a building. When construction behavior is redesigned in Phase 2 (units build from inside, buildings complete around them), an escape case will be needed: if a unit starts A* on a tile belonging to a completed building, all tiles of *that specific building* are treated as passable for that query.
 
 TARGET TILE SYSTEM
 
@@ -247,12 +255,12 @@ LAYOUT POSITIONS
 
 Each building has a `layout` table defining positions within the footprint:
 
-**Functional positions** (on F or D tiles — units path here): `workstation`, `beds`, `seats`.
+**Functional positions** (on F or D tiles — units path here): `workstation`, `beds`, `seats`. `workstation` is always an array — single-worker buildings have one element.
 
 ```lua
 bakery = {
     layout = {
-        workstation    = { x = 1, y = 1 },
+        workstation = { { x = 1, y = 1 } },
     },
 }
 cottage = {
@@ -283,7 +291,9 @@ PLACEMENT VALIDATION
 - Clearing tiles must not overlap another building's wall tiles
 - The tile immediately outside the door must be pathable
 - **Perimeter F tiles** are only allowed on faces that have an impassable-terrain clearing — validation checks which face the tile is on and whether that face has such a clearing (derivable from the `placement` field)
-- **Unit occupancy:** any footprint tile with `target_of_unit ~= nil` or `#tile.unit_ids > 0` is invalid. This prevents buildings from being placed on tiles where units are standing or targeting, removing the need for units to escape blueprints in P1. Unit escape from blueprints is a Phase 2 consideration when construction behavior is redesigned.
+- **Unit occupancy (P1):** any footprint tile with `target_of_unit ~= nil` or `#tile.unit_ids > 0` is invalid. In P2, units are displaced on placement instead of blocking — see BEHAVIOR.md Construction Work Cycle for the displacement sweep.
+- **Plants (P1):** any footprint tile with `tile.plant_type ~= nil` is invalid (trees and berry bushes both block). In P2, trees become clearable obstructions — the building enters blueprint phase and clearing activities are posted. Berry bush clearing comes online in P3.
+- **Ground piles (P1):** any footprint tile with `tile.ground_pile_id ~= nil` is invalid. In P2, ground piles become clearable obstructions — the building enters blueprint phase and clearing haul activities are posted.
 - **Solid buildings** (`is_solid = true`) have no door — all tiles are wall. Validation only requires all footprint tiles on pathable terrain.
 
 Edge buildings (fishing dock, mines) have row-based terrain constraints relative to orientation. The door face is "front," the opposite edge is "back":
@@ -293,15 +303,23 @@ Edge buildings (fishing dock, mines) have row-based terrain constraints relative
 
 Edge buildings can transform impassable tiles (water, rock) into passable interior space when built.
 
-CONSTRUCTION STATE
+CONSTRUCTION PHASES
 
-While under construction, all tiles of a blueprint are impassable (current behavior). On completion, interior F/D tiles become passable. No mid-construction pathfinding weirdness.
+Buildings progress through three phases: `"blueprint"` → `"constructing"` → `"complete"`.
+
+**Blueprint (P2 only).** The building has been placed but the site has not been cleared. Footprint tiles are impassable to most units, but units with the A* building exemption for this building can path through (see Pathfinding A* Building Exemption). Clearing activities (chop for trees, clear for berry bushes, haul for ground piles) are posted into `posted_activity_ids`. Construction material haul activities are NOT posted during this phase — they post on transition to constructing. The blueprint transitions to constructing when all clearing activities are complete and no units remain on footprint tiles. See BEHAVIOR.md Construction Work Cycle for clearing behavior, activity flow, and unit displacement.
+
+**Constructing.** All footprint tiles are impassable. Construction material haul activities and the build activity are posted. Builder delivers materials and builds. See BEHAVIOR.md Construction Work Cycle.
+
+**Complete.** Interior F/D tiles become passable. The building is operational.
+
+**P1 behavior:** Buildings are placed instantly as `"complete"` — no construction phase, no `build_cost` consumed, no build activities posted. On placement, footprint tiles are claimed (`tile.building_id` set) and interior F/D tiles are immediately passable. The `build_cost` and `build_ticks` values in BuildingConfig exist for P2 when the construction system comes online. In P2, buildings with clearable obstructions on their footprint enter blueprint phase; buildings on clear sites are placed as `"constructing"`.
 
 BUILDINGS WITHOUT TILE MAPS
 
 **Stockpiles:** Open area, every tile is a storage entry in the tile inventory. No walls, no door, no tile map. All tiles are directly accessible.
 
-**Farms:** Player-sized open passable area. No wall/floor model. See ECONOMY.md Frost and Farming for per-tile crop state and farm controls.
+**Farms:** Player-sized open passable area. No wall/floor model. See ECONOMY.md Frost and Farming for per-tile crop state and farm controls. Farms go through the blueprint phase in P2 when obstructions exist on footprint tiles.
 
 SOLID BUILDINGS
 
@@ -309,9 +327,7 @@ Gathering hubs (woodcutter's camp, gatherer's hut, herbalist's hut) are solid st
 
 PATHFINDING INTEGRATION
 
-`getTileCost` checks building tiles: if the tile belongs to a completed building and its tile map entry is W, impassable. If F or D, passable at BASE_MOVE_COST. Blueprints (not yet built) remain fully impassable for pathfinding, passable for path-following (existing behavior).
-
-**Escape case (Phase 2):** Not needed in P1 — placement validation prevents buildings on occupied tiles. See PATH STORAGE for Phase 2 notes.
+`getTileCost` checks building tiles: if the tile belongs to a completed building and its tile map entry is W, impassable. If F or D, passable at BASE_MOVE_COST. Blueprint tiles and under-construction tiles are impassable unless the A* building exemption applies (see Pathfinding A* Building Exemption).
 
 ## Plant System
 
@@ -326,10 +342,12 @@ When `plant_growth == 0`, `plant_type` must be `nil`. When `plant_growth > 0`, `
 
 **Harvest:** Trees → chopping sets growth=0, type=nil (permanent removal). Herb bushes/berry bushes → gathering resets growth to 1 (regrowth).
 
+**Clearing (P3 for berry bushes):** Sets growth=0, type=nil (permanent removal). Yields the same resource as gathering. Distinct from harvest — clearing destroys the plant entirely.
+
 **Cursor scan:** `SPREAD_TILES_PER_TICK` (50) tiles per tick, linear wrap. Seedling/young → promote if enough ticks elapsed per `PlantConfig[type].seedling_ticks` / `young_ticks` (defer tree seedling→young if unit on tile). Mature → spread same type to random tile within manhattan distance `PlantConfig[type].spread_radius`.
 
 **Growth data:** `world.growing_plant_data[tileIndex(x, y)] = planted_tick`. Stages 1–2 only. Removed on promotion to mature.
 
-**Safety:** No spread adjacent to buildings.
+**Safety:** No spread adjacent to buildings. No spread onto blueprint tiles (`tile.building_id` set).
 
 **Performance note:** The cursor scan touches every tile including mature plants. At high mature plant density (30,000+ tiles), the per-tick cost is still low (just a growth check and a `spread_chance` random roll per mature tile), but if profiling shows issues, a mature plant list could replace the full-tile scan.

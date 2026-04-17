@@ -1,5 +1,5 @@
 # Sovereign — UI.md
-*v5 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
+*v14 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
 
 ## Camera
 
@@ -11,11 +11,11 @@ Zoom range: `ZOOM_MIN` (0.5) to `ZOOM_MAX` (2.0). Pan via edge scroll or keyboar
 
 MODULE STRUCTURE
 
-UI is organized as per-region modules coordinated by a hub (`ui/ui.lua`). Each region owns its own draw and input handling. The hub calls them in the correct order for input routing and drawing. Adding a new region means adding it to the hub's two call lists.
+UI is organized as per-region modules coordinated by a hub (`ui/hub.lua`). Each region owns its own draw and input handling. The hub calls them in the correct order for input routing and drawing. Adding a new region means adding it to the hub's two call lists.
 
 ```
 ui/
-  ui.lua              -- hub: input routing, draw ordering, active_layer, interaction mode
+  hub.lua              -- hub: input routing, draw ordering, active_layer, interaction mode
   right_panel.lua
   left_panel.lua
   action_bar.lua      -- persistent buttons (placement, designation)
@@ -55,25 +55,11 @@ Left-click selects. Right-click cancels modes and clears selection. Escape close
 
 HOTKEYS
 
-| Key | Action |
-|---|---|
-| Space | Toggle pause/unpause (returns to previous speed) |
-| 1–4 | Set speed level (1 = slowest, 4 = fastest) |
-| Q | Place: Stockpile |
-| W | Place: Cottage |
-| E | Place: Woodcutter's Camp |
-| R | Place: Gatherer's Hut |
-| T | Place: Fishing Dock |
-| A | Designate: Chop |
-| S | Designate: Gather |
-| X | Cancel Designation |
-| Tab | Rotate building (in placement mode) |
-| Del | Delete selected building |
-| F1 | Debug: spawn serf at cursor |
-| Shift+F1 | Debug: spawn 5 serfs at cursor |
-| F3 | Toggle developer overlay |
+All non-debug hotkeys are remappable via the `Keybinds` table in `config/keybinds.lua`. The input handler checks `love.keyboard.isDown(Keybinds.action_name)` instead of checking key literals directly. See TABLES.md for default bindings.
 
-Building and designation hotkeys expand as new buildings and designation types come online in later phases.
+Debug keys (hardcoded, not remappable): F1 (spawn serf at cursor), Shift+F1 (spawn 5 serfs), F3 (toggle developer overlay).
+
+Building placement has no hotkeys — the player clicks the action bar button. Designation hotkeys expand as new designation types come online in later phases.
 
 ## Layout
 
@@ -97,15 +83,19 @@ Multi-select via drag box or shift-click selects multiple units. Multi-selected 
 
 ## Building Placement
 
-Player enters placement mode by clicking an action bar button or pressing a building hotkey.
+Player enters placement mode by clicking an action bar button.
 
 GHOST PREVIEW
 
-A tinted footprint follows the cursor, snapping to the tile grid. Per-tile coloring shows placement validity: green = valid, red = invalid. The ghost shows the tile map (walls, floor, door) so the player can see orientation.
+A tinted footprint follows the cursor, snapping to the tile grid. Per-tile coloring shows placement validity. The ghost shows the tile map (walls, floor, door) so the player can see orientation.
+
+**P1 coloring:** Green = valid, red = invalid. All obstructions (units, trees, berry bushes, ground piles, terrain, other buildings) show red. Left-clicking when any tile is red does not place the building — a brief red pulse on the ghost and an error sound provide feedback.
+
+**P2 coloring:** Three colors. Green = valid (clear tile). Yellow = clearable obstruction (tree, ground pile, and berry bush once P3 clearing comes online). Red = hard block (impassable terrain, other buildings, clearing overlap violations). Units on footprint tiles are ignored — they are displaced on placement. Left-clicking when any tile is red does not place the building. Left-clicking when all tiles are green or yellow places the building — yellow tiles trigger the blueprint phase with clearing activities (see BEHAVIOR.md Construction Work Cycle).
 
 VALIDATION
 
-See WORLD.md Placement Validation for all placement rules (terrain, clearing overlap, door adjacency, unit occupancy, edge buildings, solid buildings). The ghost preview displays per-tile validity: green = valid, red = invalid. Left-clicking an invalid position does not place the building — a brief red pulse on the ghost and an error sound provide feedback.
+See WORLD.md Placement Validation for all placement rules (terrain, clearing overlap, door adjacency, plants, ground piles, unit occupancy, edge buildings, solid buildings).
 
 ROTATION
 
@@ -144,7 +134,7 @@ CANCELLING DESIGNATIONS
 
 X enters cancel designation mode. Click-and-drag a rectangle to remove all designations within. Stays in cancel mode until right-click or Escape.
 
-Cancelling a designation removes the job from `world.jobs`. If a serf had claimed the job, their `job_id`, `claimed_tile`, and `tile.claimed_by` are cleared.
+Cancelling a designation removes the activity from `world.activities`. If a serf had claimed the activity, their `activity_id`, `claimed_tile`, and `tile.claimed_by` are cleared.
 
 ## Right Panel
 
@@ -152,7 +142,7 @@ Always visible. Contents from top to bottom:
 
 TIME AND SPEED
 
-Time display in **Year 4 - Spring - Tuesday - 3:00 PM** format. Four speed buttons (1–4) with the active speed highlighted, plus a pause indicator. Clicking speed buttons and pause works identically to the hotkeys.
+Time display in **Year 4 - Spring - Tuesday - 3:00 PM** format. Six speed buttons (1–6) with the active speed highlighted, plus a pause indicator. Clicking speed buttons and pause works identically to the hotkeys.
 
 POPULATION SUMMARY
 
@@ -182,7 +172,7 @@ P1 IMPLEMENTATION (DEBUG DUMP)
 
 A `tableToString(entity)` helper recursively formats any entity table into labeled rows of text with indentation for nested tables. Selecting a unit dumps the unit table. Selecting a building dumps the building table. Selecting a map tile dumps `world.tiles[idx]`. Selecting a ground pile dumps the ground pile entity.
 
-The dump refreshes live so the player sees values changing in real time — need drain, activity progress, carrying contents.
+The dump refreshes live so the player sees values changing in real time — need drain, action progress, carrying contents.
 
 As the game matures, per-entity-type panels with designed layouts replace the debug dump. The left panel also hosts entity configuration controls (stockpile filters, production orders, farm controls, specialty assignment) as they come online in Phase 2.
 
@@ -212,8 +202,8 @@ Persistent buttons in the bottom bar. Always visible regardless of selection.
 
 P1 BUTTONS
 
-- Building placement buttons: Stockpile (Q), Cottage (W), Woodcutter's Camp (E), Gatherer's Hut (R), Fishing Dock (T)
-- Designation buttons: Chop (A), Gather (S), Cancel Designation (X)
+- Building placement buttons: Stockpile, Cottage, Woodcutter's Camp, Gatherer's Hut, Fishing Dock
+- Designation buttons: Chop, Gather, Cancel Designation
 - Management overlay buttons: Population List
 
 FUTURE BUTTONS (Phase 2+)
@@ -236,7 +226,7 @@ SERF PRIORITY CONFIGURATION (Phase 2)
 
 STORAGE FILTER CONFIGURATION (Phase 2)
 
-Per-type filter controls on storage building left panels. Each resource type shows its current mode (reject / accept / get) and optional limit. "Get" entries allow selecting a source building. See ECONOMY.md Storage Filter System for filter mechanics.
+Per-type filter controls on storage building left panels. Each resource type shows its current mode (reject / accept / pull) and optional limit. "Pull" entries allow selecting a source building. See ECONOMY.md Storage Filter System for filter mechanics.
 
 ## Notifications
 

@@ -1,0 +1,2 @@
+-- config/constants.lua
+-- Global constants. Populated in M02.

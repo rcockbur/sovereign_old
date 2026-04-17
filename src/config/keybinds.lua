@@ -1,0 +1,2 @@
+-- config/keybinds.lua
+-- Keybind config table. Populated in M02.

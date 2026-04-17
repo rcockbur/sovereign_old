@@ -1,5 +1,5 @@
 # Sovereign — ECONOMY.md
-*v5 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
+*v12 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
 
 ## Resource System
 
@@ -28,7 +28,7 @@ item = {
 }
 ```
 
-Items are non-fungible — each one is unique. Durability decreases over time: tools drain per tick during the `work` activity, clothing drains per tick while awake. When durability reaches 0, the item is destroyed (removed from `world.items` and registry). The unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning per phase.
+Items are non-fungible — each one is unique. Durability decreases over time: tools drain per tick during the `work` action, clothing drains per tick while awake. When durability reaches 0, the item is destroyed (removed from `world.items` and registry). The unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning per phase.
 
 CONTAINERS
 
@@ -109,24 +109,24 @@ All containers use `reserved_in` and `reserved_out` to prevent collisions from c
 - **Available capacity** = capacity - used - reserved_in
 - **Available stock** = stock - reserved_out
 
-Reservations are placed when a haul job is claimed (whether public or private). Every resource transfer in the game goes through a haul job — self-fetch, self-deposit, filter pull jobs, construction delivery, merchant delivery, and ground pile cleanup all post jobs and all use reservations.
+Reservations are placed when a haul activity is claimed (whether public or private). Every resource transfer in the game goes through a haul activity — self-fetch, self-deposit, filter pull activities, construction delivery, merchant delivery, and ground pile cleanup all post activities and all use reservations.
 
-Jobs fall into two categories:
+Activities fall into two categories:
 
 | Category | Posted by | Claimable by | Examples |
 |---|---|---|---|
 | Private | Unit, claimed atomically | Same unit only | Self-fetch, self-deposit, merchant delivery, home food self-fetch, eating trip reservation, equipment want fetch |
-| Public | System or entity | Any eligible hauler | Construction delivery, ground pile cleanup, filter pull jobs |
+| Public | System or entity | Any eligible hauler | Construction delivery, ground pile cleanup, filter pull activities |
 
-Private jobs are invisible to other units but visible to the reservation system. They exist purely as a vehicle for reservation tracking and cleanup.
+Private activities are invisible to other units but visible to the reservation system. They exist purely as a vehicle for reservation tracking and cleanup.
 
-**Reservation lifecycle:** Reserve on claim → release on delivery/pickup → also release on death, need interrupt, job cancellation, or building deletion. The `secondary_haul_job_id` on the unit tracks private jobs so death cleanup can find and release their reservations.
+**Reservation lifecycle:** Reserve on claim → release on delivery/pickup → also release on death, need interrupt, activity cancellation, or building deletion. The `secondary_haul_activity_id` on the unit tracks private activities so death cleanup can find and release their reservations.
 
 RESOURCES MODULE (`simulation/resources.lua`)
 
 The resources module is the sole owner of all resource mutations. Every operation that creates, destroys, moves, or reserves resource entities goes through this module — no other module writes directly to container contents, reservation fields, or `world.resource_counts`. All functions use dot syntax (no `self`).
 
-Every create, destroy, transfer, reserve, equip, and durability-break operation maintains `world.resource_counts` as a side effect — incrementing/decrementing the appropriate category and type. See Resource Counts System.
+All mutation operations maintain `world.resource_counts` as a running tally — see Resource Counts.
 
 The module uses a generic container interface. Callers pass a container reference (e.g., `building.storage`, `building.housing.bins[i]`, `building.production.input_bins[i]`, or a ground_pile entity). The module dispatches internally based on `container.container_type`. Callers never branch on container type.
 
@@ -193,7 +193,7 @@ Each sub-table is `{ [type] = amount }`. Systems query the category they care ab
 
 `reserved_in` is not tracked globally — available capacity is per-building and depends on filters, bin sizes, and tile layouts, making a global sum meaningless.
 
-`resources.rebuildCounts()` bootstraps counts on game load and save load. Running tallies maintained as a side effect of every resources module operation. `resources.validateCounts()` is a debug-only full recount that asserts accuracy — guarded behind `DEBUG_VALIDATE_RESOURCE_COUNTS`.
+Running tallies are maintained as a side effect of every resources module mutation operation.
 
 ## Frost and Farming
 
@@ -201,7 +201,7 @@ FROST/THAW SYSTEM
 
 At the start of each year, the game rolls two values: `thaw_day` (a spring day number) and `frost_day` (an autumn day number). The growing window is the period between thaw and frost. Outside this window, `world.time.is_frost` is true and farming is restricted.
 
-**Thaw:** When the calendar reaches spring day `thaw_day`, `is_frost` is set to false. Notification: "The ground has thawed." Planting becomes possible (farms with `allow_planting` enabled begin posting jobs).
+**Thaw:** When the calendar reaches spring day `thaw_day`, `is_frost` is set to false. Notification: "The ground has thawed." Planting becomes possible (farms with `allow_planting` enabled begin posting activities).
 
 **Frost warning:** 1–2 days before `frost_day` (configurable via `FROST_WARNING_DAYS`), notification: "Frost is approaching." This is the player's signal to trigger "Harvest Now" on any farms with immature crops.
 
@@ -220,21 +220,21 @@ No per-tile state machine — just a timestamp and a formula.
 
 FARM CONTROLS
 
-Four controls on the farm panel:
+Four controls on each farm:
 
 - **Crop selector:** wheat / barley / flax / nil (fallow). Changing crop destroys any currently planted tiles. Setting to nil disables all farming work.
-- **`allow_planting` toggle:** When on and `is_frost` is false, empty tiles are eligible for planting work. When off, no planting jobs post regardless of season.
+- **`allow_planting` toggle:** When on and `is_frost` is false, empty tiles are eligible for planting work. When off, no planting activities post regardless of season.
 - **`auto_harvest`:** Three states:
   - `"off"` — No auto-harvest. Player uses "Harvest Now" for all harvesting.
   - `"per_tile"` — Each tile becomes eligible for harvest work individually when it reaches 1.0 maturity.
   - `"per_farm"` — The farm waits for all planted tiles to reach 1.0 maturity, then all become eligible simultaneously. Punishes staggered planting — the earliest tiles sit at 100% waiting for the last.
 - **"Harvest Now" button:** One-shot action. Makes all planted tiles immediately eligible for harvest at their current maturity. This is the only way to harvest immature crops. Does not change the `auto_harvest` setting.
 
-FARM JOB POSTING
+FARM ACTIVITY POSTING
 
-The farm posts jobs when there are eligible tiles (for planting or harvesting) and `#posted_job_ids < worker_limit`. One job per open worker slot, not per tile. A farmer claims the job, paths to the farm, and their handler picks the next eligible tile. When no more eligible tiles exist, the farmer returns to the job queue.
+The farm posts activities when there are eligible tiles (for planting or harvesting) and `#posted_activity_ids < worker_limit`. One activity per open worker slot, not per tile. A farmer claims the activity, paths to the farm, and their handler picks the next eligible tile. When no more eligible tiles exist, the farmer returns to the activity queue.
 
-During the growing season when no tiles are eligible for planting or harvesting, the farm posts no jobs. Farmers return to the job queue and pick up other serf work — summer is free labor.
+During the growing season when no tiles are eligible for planting or harvesting, the farm posts no activities. Farmers return to the activity queue and pick up other serf work — summer is free labor.
 
 HARVEST YIELD
 
@@ -252,11 +252,11 @@ ground_pile = {
     id = 0,
     x = 0, y = 0,
     contents = {},       -- flat array of entity ids (stacks and items mixed)
-    reserved_out = 0,    -- reserved by haulers claiming pickup jobs
+    reserved_out = 0,    -- reserved by haulers claiming pickup activities
 }
 ```
 
-Ground piles self-post one haul job per resource type they contain. When a hauler picks up all entities of a given type, the corresponding job is removed. When the pile is fully emptied, it is destroyed (removed from `world.ground_piles` and registry, `tile.ground_pile_id` cleared). If no valid storage has capacity, the jobs still post but won't be claimed until space opens up — the pile persists on the ground indefinitely. Ground pile haul jobs use `destination_id = nil` — the hauler resolves the nearest valid storage with capacity at claim time. If no storage has capacity, the job is skipped.
+Ground piles self-post one haul activity per resource type they contain. When a hauler picks up all entities of a given type, the corresponding activity is removed. When the pile is fully emptied, it is destroyed (removed from `world.ground_piles` and registry, `tile.ground_pile_id` cleared). If no valid storage has capacity, the activities still post but won't be claimed until space opens up — the pile persists on the ground indefinitely. Ground pile haul activities use `destination_id = nil` — the hauler resolves the nearest valid storage with capacity at claim time. If no storage has capacity, the activity is skipped.
 
 Not a player-configurable entity. No filters, no settings.
 
@@ -285,7 +285,7 @@ Every storage building has a `filters` table on its container, populated at buil
 ```lua
 filters = {
     wood  = { mode = "accept", limit = nil },
-    iron  = { mode = "get",    limit = 100, source_id = 5 },
+    iron  = { mode = "pull",   limit = 100, source_id = 5 },
     stone = { mode = "reject" },
 }
 ```
@@ -294,13 +294,13 @@ Three modes per type:
 
 - **reject** — building will not accept this type. Existing stock of a rejected type is not automatically removed — it remains until withdrawn by a pull from another building.
 - **accept** — building passively accepts deliveries (default routing, ground pile cleanup, self-deposit). Optional `limit` caps how much the building will hold of this type.
-- **get** — building actively pulls this type from another storage building. Required `limit` sets the target amount. Optional `source_id` names a specific source building; nil means "from anywhere."
+- **pull** — building actively pulls this type from another storage building. Required `limit` sets the target amount. Optional `source_id` names a specific source building; nil means "from anywhere."
 
-`resources.accepts()` returns true for "accept" and "get" modes, false for "reject." `resources.getAvailableCapacity()` respects the filter limit — if set, capacity is `min(physical_capacity, limit - current_stock_of_type) - reserved_in`.
+`resources.accepts()` returns true for "accept" and "pull" modes, false for "reject." `resources.getAvailableCapacity()` respects the filter limit — if set, capacity is `min(physical_capacity, limit - current_stock_of_type) - reserved_in`.
 
 PULL MECHANICS
 
-The filter system scans storage buildings via hash-offset (once per `HASH_INTERVAL`). For each building, it checks filter entries in "get" mode and posts haul jobs based on deficit:
+The filter system scans storage buildings via hash-offset (once per `HASH_INTERVAL`). For each building, it checks filter entries in "pull" mode and posts haul activities based on deficit:
 
 ```lua
 needed = limit - current_stock - reserved_in
@@ -309,22 +309,22 @@ transfer = min(needed, available)
 
 units_per_trip = floor(CARRY_WEIGHT_MAX / ResourceConfig[resource].weight)
 trips_needed = ceil(transfer / units_per_trip)
-jobs_to_post = max(0, trips_needed - jobs_in_transit_for_this_filter)
+activities_to_post = max(0, trips_needed - activities_in_transit_for_this_filter)
 ```
 
 SOURCE RESOLUTION
 
-**"Get from specific building"** (`source_id` set): pull directly from the named building regardless of its filter mode, subject to cycle detection. Stock checks respect reservations.
+**"Pull from specific building"** (`source_id` set): pull directly from the named building regardless of its filter mode, subject to cycle detection. Stock checks respect reservations.
 
-**"Get from anywhere"** (`source_id` is nil): find the nearest storage building with available stock of the type whose filter for that type is NOT in "get" mode. Buildings with the type set to "accept" or "reject" are both valid sources — "reject" means the building won't accept new deliveries of that type, not that its existing stock is unavailable. Buildings with the type in "get" mode are excluded to prevent tug-of-war between two buildings that are both actively acquiring the same resource.
+**"Pull from anywhere"** (`source_id` is nil): find the nearest storage building with available stock of the type whose filter for that type is NOT in "pull" mode. Buildings with the type set to "accept" or "reject" are both valid sources — "reject" means the building won't accept new deliveries of that type, not that its existing stock is unavailable. Buildings with the type in "pull" mode are excluded to prevent tug-of-war between two buildings that are both actively acquiring the same resource.
 
 CYCLE DETECTION
 
-When the player sets a filter entry on building A to "get type R from building B," reject if building B's filter for type R is already "get from building A." 3+ building cycles are on the player.
+When the player sets a filter entry on building A to "pull type R from building B," reject if building B's filter for type R is already "pull from building A." 3+ building cycles are on the player.
 
 EDGE CASES
 
-- Source empty at pickup: job fails, removed, reservations released, re-evaluated next scan.
+- Source empty at pickup: activity fails, removed, reservations released, re-evaluated next scan.
 - Destination full at delivery: hauler follows through to next valid storage, or drops via ground drop search. One followthrough attempt.
 - Competing demand (two buildings pulling same type from same source): reservations prevent over-commitment.
 - Resource with no valid destination: drop via ground drop search. Always.
@@ -334,23 +334,23 @@ RESOURCE MOVEMENT OVERVIEW
 
 Two systems handle resource movement. They don't overlap.
 
-**Ground pile cleanup** posts haul jobs directly when piles are created. **Construction delivery** posts haul jobs on building placement. Both are independent of the filter system.
+**Ground pile cleanup** posts haul activities directly when piles are created. **Construction delivery** posts haul activities on building placement. Both are independent of the filter system.
 
-**Storage filters** control all inter-storage resource flow. Default routing (self-deposit, ground pile cleanup) delivers to the nearest storage building that accepts the type and has capacity. "Get" filter entries post pull jobs to actively move resources between specific buildings. The filter table on each storage building is the complete logistics configuration.
+**Storage filters** control all inter-storage resource flow. Default routing (self-deposit, ground pile cleanup) delivers to the nearest storage building that accepts the type and has capacity. "Pull" filter entries post pull activities to actively move resources between specific buildings. The filter table on each storage building is the complete logistics configuration.
 
-**Job selection:** All haul jobs (filter pull jobs, ground pile cleanup, construction delivery) are scored by two universal factors: distance to source and job age. No job-type-specific scoring. Serfs filter by their per-job-type priority settings (DISABLED / LOW / NORMAL / HIGH) — this determines which job types a serf considers, not how individual jobs within a type are ranked.
+**Activity selection:** All haul activities are scored the same way as any other activity — see BEHAVIOR.md Activity Scoring.
 
 ## Merchant Delivery System
 
-The merchant is a stationed specialty worker at the market. They claim the market's job once and run an internal delivery loop for food only. Equipment (tools, clothing) is handled by units themselves — see BEHAVIOR.md Equipment Wants. Each delivery run uses the private haul job pattern for reservation tracking: the merchant self-posts a haul job (source = storage building, destination = housing bin), claims it immediately, reserves stock at source and capacity at destination. This is the only system that writes to housing building bins. Without a market, units self-fetch food — see BEHAVIOR.md Home Food Self-Fetch.
+The merchant is a stationed specialty worker at the market. They claim the market's activity once and run an internal delivery loop for food only. Equipment (tools, clothing) is handled by units themselves — see BEHAVIOR.md Equipment Wants. Each delivery run uses the private haul activity pattern for reservation tracking: the merchant self-posts a haul activity (source = storage building, destination = housing bin), claims it immediately, reserves stock at source and capacity at destination. This is the only system that writes to housing building bins. Without a market, units self-fetch food — see BEHAVIOR.md Home Food Self-Fetch.
 
 MERCHANT LOOP
 
-1. Idle at market (duration = `MerchantConfig.idle_ticks_base` scaled inversely by trading skill)
+1. Idle at market (duration = `MerchantConfig.idle_ticks_base` scaled inversely by trading skill — formula pending)
 2. Check if any home has total food < `critical_threshold` per member → if yes, start a critical food run. Total food is the sum of amounts across all food-type housing bins.
 3. If no critical homes → select the food type with the highest `current_tick - last_delivered_tick`, filtered to types where `resource_counts.storage[type] - resource_counts.storage_reserved[type] > 0`. Reset `last_delivered_tick` for the winning type after the run completes. If no food type has available stock, idle and retry next loop.
-4. Self-post private haul job (source = nearest storage building with available stock, destination = first eligible home's bin). Reserve stock and capacity. Travel to storage, load up to MerchantConfig.carry_capacity of the selected food type.
-5. Find eligible home with lowest total food per member (ties broken by nearest), travel there, deposit into the matching food bin. Drop `drop_amount`. Release reservation for this home, post new private job for next home if continuing.
+4. Self-post private haul activity (source = nearest storage building with available stock, destination = first eligible home's bin). Reserve stock and capacity. Travel to storage, load up to MerchantConfig.carry_capacity of the selected food type.
+5. Find eligible home with lowest total food per member (ties broken by nearest), travel there, deposit into the matching food bin. Drop `drop_amount`. Release reservation for this home, post new private activity for next home if continuing.
 6. If still carrying and more eligible homes exist → repeat step 5
 7. When carry empty or no more eligible homes → return to market, restart at 1
 
@@ -360,7 +360,7 @@ Triggered when any home's total food (across all food-type housing bins) falls b
 
 STANDARD FOOD RUNS
 
-When no homes are critical, the merchant selects the food type that has gone longest without delivery, filtered to types with available stock in storage. This pure aging rotation naturally diversifies home food supplies, supporting the food variety mood bonus without player intervention.
+When no homes are critical, the merchant selects the food type that has gone longest without delivery, filtered to types with available stock in storage.
 
 A home is eligible for a standard food delivery when its stock of the selected food type (checked on the matching housing bin) is below the per-type `bin_threshold` value from MerchantConfig (multiplied by household size).
 
@@ -380,15 +380,13 @@ Homes visited on a critical run must be below the serious threshold (total food 
 
 FIREWOOD PRODUCTION
 
-Wood is processed into firewood at a chopping block (or similar simple building — exact building name TBD). Firewood is a stackable resource consumed by two systems: home heating in winter and steel production at the bloomery. The bloomery recipe requires firewood as an input alongside iron. See TABLES.md RecipeConfig for the steel recipe.
-
-Wood now serves three competing purposes: construction (build costs), firewood for home heating, and firewood for smelting. This tension is the core design intent — the player who over-invests in steel production going into winter risks running short on heating fuel.
+Wood is processed into firewood at a chopping block (or similar simple building — exact building name TBD). Firewood is a stackable resource consumed by two systems: home heating in winter and steel production at the bloomery. The bloomery recipe requires firewood as an input alongside iron. See TABLES.md RecipeConfig for the steel recipe. See DESIGN.md Firewood and Home Heating for design rationale.
 
 HOME HEATING
 
 *Pending detailed design.* High-level concept:
 
-Homes consume firewood during winter to keep residents warm. Firewood must be delivered to homes (delivery mechanism TBD — possibly an extension of the merchant system, or a dedicated firewood delivery job). Homes that run out of firewood impose a mood or health penalty on residents.
+Homes consume firewood during winter to keep residents warm. Firewood must be delivered to homes (delivery mechanism TBD — possibly an extension of the merchant system, or a dedicated firewood delivery activity). Homes that run out of firewood impose a mood or health penalty on residents.
 
 Key design questions to resolve:
 - Delivery mechanism — merchant, storage filter pulls, or a new system

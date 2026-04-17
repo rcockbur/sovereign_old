@@ -1,0 +1,2 @@
+-- config/tables.lua
+-- Config tables (NeedsConfig, ResourceConfig, etc.). Populated in M02.
