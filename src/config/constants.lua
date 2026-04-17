@@ -110,3 +110,37 @@ ZOOM_MAX  = 2.0
 -- Day and season names (indexed 1-based)
 DAY_NAMES    = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
 SEASON_NAMES = { "Spring", "Summer", "Autumn", "Winter" }
+
+-- Tile index helpers
+function tileIndex(x, y)
+    return (x - 1) * MAP_HEIGHT + y
+end
+
+function tileXY(index)
+    local x = math.floor((index - 1) / MAP_HEIGHT) + 1
+    local y = (index - 1) % MAP_HEIGHT + 1
+    return x, y
+end
+
+-- Map generation parameters (tune by adjusting these constants)
+GEN_WATER_FREQ            = 0.03
+GEN_WATER_THRESHOLD       = 0.03   -- noise below this → water (~3% coverage)
+
+GEN_ROCK_FREQ             = 0.04
+GEN_ROCK_THRESHOLD_SETTLE = 0.975  -- noise above this → rock (~2.5% coverage)
+GEN_ROCK_THRESHOLD_FOREST = 0.93   -- noise above this → rock (~7% coverage)
+GEN_ROCK_MIN_CLUSTER      = 3      -- clusters smaller than this revert to grass
+
+GEN_TREE_FREQ             = 0.035
+GEN_TREE_THRESHOLD_SETTLE = 0.92   -- noise above this → tree (~8% of eligible)
+GEN_TREE_THRESHOLD_FOREST = 0.20   -- noise above this → tree (~80% of eligible)
+
+GEN_BERRY_CHANCE_SETTLE   = 0.015  -- per-tile roll (settlement)
+GEN_BERRY_CHANCE_FOREST   = 0.04   -- per-tile roll (forest/transition)
+
+GEN_TRANSITION_START = 180   -- column where settlement→forest blend begins
+GEN_TRANSITION_END   = 220   -- column where forest blend is fully applied
+
+GEN_START_X    = 100   -- starting area center column
+GEN_START_Y    = 100   -- starting area center row
+GEN_START_SIZE = 10    -- starting area side length
