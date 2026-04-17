@@ -5,9 +5,12 @@
 
 *Updated by Claude Code as systems are implemented.*
 
-Completed: M01
+**M01**
+- Implemented without issue.
 
-**M01** — Project scaffold, game state machine, and three state files (loading, main_menu, playing) are implemented. Stub config files created. `love src` launches to main menu; "New Game" switches to blank playing state; Escape returns to menu; Escape on menu quits.
+**M02**
+- Switched log output from `io.open` to `love.filesystem` — `io.popen` on Windows caused a 5-second startup hang. Logs write to `Roaming/LOVE/sovereign/logs/`. 20-file rotation restored.
+- `t.identity = "sovereign"` added to `conf.lua` to name the save directory correctly.
 
 ## Phase 1 Milestones
 

@@ -3,12 +3,6 @@
 
 > **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
 
-## Pending Review
-
-*Items added by Claude Code during implementation that need design review in the next Claude.ai chat session. Resolved items are removed during document updates at session end.*
-
-(none)
-
 ## Technical Routing Table
 
 Detailed specs live in separate files. Read the relevant file before implementing a system. All files live at the repo root and are attached to the Claude.ai project.

@@ -5,16 +5,8 @@ local gamestate = {}
 
 local stack = {}
 
-local function top()
-    return stack[#stack]
-end
-
-local function callHook(name, ...)
-    local state = top()
-    if state and state[name] then
-        state[name](...)
-    end
-end
+local top
+local callHook
 
 function gamestate:switch(state)
     if top() and top().exit then
@@ -58,6 +50,17 @@ end
 
 function gamestate:mousepressed(x, y, button)
     callHook("mousepressed", x, y, button)
+end
+
+function top()
+    return stack[#stack]
+end
+
+function callHook(name, ...)
+    local state = top()
+    if state and state[name] then
+        state[name](...)
+    end
 end
 
 return gamestate
