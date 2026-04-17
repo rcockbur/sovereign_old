@@ -27,6 +27,9 @@
 **M06**
 - Implemented without issue.
 
+**M07**
+- Implemented without issue.
+
 ## Phase 1 Milestones
 
 Granular implementation milestones for Phase 1 (Survival). Claude Code implements these one at a time in order. Each milestone builds on the last — later milestones assume all earlier ones are complete.

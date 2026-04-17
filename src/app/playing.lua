@@ -7,6 +7,7 @@ local time      = require("core.time")
 local units     = require("simulation.units")
 local camera    = require("ui.camera")
 local renderer  = require("ui.renderer")
+local hub       = require("ui.hub")
 local log       = require("core.log")
 
 local playing = {}
@@ -70,10 +71,14 @@ function playing.draw()
     camera.applyTransform()
     renderer.drawWorld()
     renderer.drawUnits()
+    renderer.drawSelection(hub.selected_tile)
     love.graphics.pop()
+
+    hub.draw()
 end
 
 function playing.keypressed(key)
+    if hub.keypressed(key) then return end
     if key == "escape" then
         gamestate:switch(require("app.main_menu"))
     elseif key == Keybinds.toggle_pause then
@@ -94,6 +99,7 @@ function playing.keypressed(key)
 end
 
 function playing.mousepressed(x, y, button)
+    hub.mousepressed(x, y, button)
     camera.mousepressed(x, y, button)
 end
 

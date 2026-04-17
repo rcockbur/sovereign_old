@@ -70,4 +70,13 @@ function renderer.drawUnits()
     end
 end
 
+function renderer.drawSelection(tile_idx)
+    if tile_idx == nil then return end
+    local x, y = tileXY(tile_idx)
+    local px   = (x - 1) * TILE_SIZE
+    local py   = (y - 1) * TILE_SIZE
+    love.graphics.setColor(1, 1, 1, 0.55)
+    love.graphics.rectangle("line", px, py, TILE_SIZE, TILE_SIZE)
+end
+
 return renderer
