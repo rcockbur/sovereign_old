@@ -12,6 +12,7 @@ local COLOR_WATER = { 0.20, 0.40, 0.75 }
 local COLOR_ROCK  = { 0.50, 0.50, 0.50 }
 local COLOR_TREE  = { 0.15, 0.35, 0.10 }
 local COLOR_BERRY = { 0.55, 0.25, 0.65 }
+local COLOR_UNIT  = { 0.90, 0.75, 0.20 }
 
 function renderer.drawWorld()
     local sw, sh = love.graphics.getDimensions()
@@ -51,6 +52,20 @@ function renderer.drawWorld()
                 love.graphics.setColor(COLOR_BERRY)
                 love.graphics.circle("fill", px + half, py + half, half * 0.35)
             end
+        end
+    end
+end
+
+function renderer.drawUnits()
+    local ts   = TILE_SIZE
+    local half = ts * 0.5
+    local r    = half * 0.4
+
+    for i = 1, #world.units do
+        local u = world.units[i]
+        if u.is_dead == false then
+            love.graphics.setColor(COLOR_UNIT)
+            love.graphics.circle("fill", (u.x - 1) * ts + half, (u.y - 1) * ts + half, r)
         end
     end
 end

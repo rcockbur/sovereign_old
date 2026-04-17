@@ -4,6 +4,7 @@
 local gamestate = require("app.gamestate")
 local world     = require("core.world")
 local time      = require("core.time")
+local units     = require("simulation.units")
 local camera    = require("ui.camera")
 local renderer  = require("ui.renderer")
 local log       = require("core.log")
@@ -16,6 +17,7 @@ function playing.enter()
     world.init()
     time.init()
     camera.init()
+    units.spawnStarting()
     prev_hour = -1
 
     local settle = { grass=0, water=0, rock=0, tree=0, berry=0 }
@@ -67,6 +69,7 @@ function playing.draw()
     love.graphics.push()
     camera.applyTransform()
     renderer.drawWorld()
+    renderer.drawUnits()
     love.graphics.pop()
 end
 
