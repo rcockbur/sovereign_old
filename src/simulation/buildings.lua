@@ -47,6 +47,11 @@ function buildings.placeStockpile(x1, y1, x2, y2)
         end
     end
 
+    local filters = {}
+    for type_name, _ in pairs(ResourceConfig) do
+        filters[type_name] = { mode = "accept", limit = nil }
+    end
+
     local building = registry.createEntity(world.buildings, {
         type                = "stockpile",
         category            = "storage",
@@ -60,7 +65,7 @@ function buildings.placeStockpile(x1, y1, x2, y2)
         storage = {
             container_type = "tile_inventory",
             tile_capacity  = STOCKPILE_TILE_CAPACITY,
-            filters        = {},
+            filters        = filters,
             tiles          = storage_tiles,
         },
     })

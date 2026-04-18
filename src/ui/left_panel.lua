@@ -24,15 +24,15 @@ local function buildLines(val, depth, lines, indent)
         return
     end
 
+    -- String keys (sorted, capped at MAX_ARRAY)
     local str_keys = {}
     for k in pairs(val) do
-        if type(k) == "string" then
-            str_keys[#str_keys + 1] = k
-        end
+        if type(k) == "string" then str_keys[#str_keys + 1] = k end
     end
     table.sort(str_keys)
-
-    for _, k in ipairs(str_keys) do
+    local str_limit = math.min(#str_keys, MAX_ARRAY)
+    for i = 1, str_limit do
+        local k = str_keys[i]
         local v = val[k]
         if type(v) == "table" then
             lines[#lines + 1] = indent .. k .. ":"
@@ -41,7 +41,11 @@ local function buildLines(val, depth, lines, indent)
             lines[#lines + 1] = indent .. k .. ": " .. tostring(v)
         end
     end
+    if #str_keys > MAX_ARRAY then
+        lines[#lines + 1] = indent .. "(" .. (#str_keys - MAX_ARRAY) .. " more keys)"
+    end
 
+    -- Sequential integer keys [1..n]
     local n = #val
     if n > 0 then
         local limit = math.min(n, MAX_ARRAY)
@@ -56,6 +60,31 @@ local function buildLines(val, depth, lines, indent)
         end
         if n > MAX_ARRAY then
             lines[#lines + 1] = indent .. "(" .. (n - MAX_ARRAY) .. " more)"
+        end
+    end
+
+    -- Sparse non-sequential integer keys (e.g. tileIndex-keyed tables)
+    local int_keys = {}
+    for k in pairs(val) do
+        if type(k) == "number" and (k < 1 or k > n or k ~= math.floor(k)) then
+            int_keys[#int_keys + 1] = k
+        end
+    end
+    if #int_keys > 0 then
+        table.sort(int_keys)
+        local limit = math.min(#int_keys, MAX_ARRAY)
+        for i = 1, limit do
+            local k = int_keys[i]
+            local v = val[k]
+            if type(v) == "table" then
+                lines[#lines + 1] = indent .. "[" .. k .. "]:"
+                buildLines(v, depth + 1, lines, indent .. "  ")
+            else
+                lines[#lines + 1] = indent .. "[" .. k .. "]: " .. tostring(v)
+            end
+        end
+        if #int_keys > MAX_ARRAY then
+            lines[#lines + 1] = indent .. "(" .. (#int_keys - MAX_ARRAY) .. " more)"
         end
     end
 end

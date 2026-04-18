@@ -5,6 +5,9 @@ local gamestate    = require("app.gamestate")
 local time         = require("core.time")
 local simulation   = require("core.simulation")
 local units        = require("simulation.units")
+local resources    = require("simulation.resources")
+local world        = require("core.world")
+local log          = require("core.log")
 local camera       = require("ui.camera")
 local renderer     = require("ui.renderer")
 local hub          = require("ui.hub")
@@ -17,6 +20,7 @@ function playing.enter()
     time.init()
     camera.init()
     units.spawnStarting()
+    resources.rebuildCounts()
 end
 
 function playing.update(dt)
@@ -66,6 +70,21 @@ function playing.keypressed(key)
         time.setSpeed(Speed.MAX)
     elseif key == "f3" then
         dev_overlay.toggle()
+    elseif key == "f2" then
+        for i = 1, #world.buildings do
+            local b = world.buildings[i]
+            if b.type == "stockpile" then
+                local amount = math.floor(CARRY_WEIGHT_MAX / ResourceConfig["wood"].weight)
+                if resources.getAvailableCapacity(b.storage, "wood") >= ResourceConfig["wood"].weight * amount then
+                    local id = resources.create("wood", amount)
+                    resources.deposit(b.storage, id)
+                    log:info("WORLD", "Debug: deposited %d wood into stockpile %d", amount, b.id)
+                else
+                    log:info("WORLD", "Debug: stockpile %d is full", b.id)
+                end
+                break
+            end
+        end
     end
 end
 

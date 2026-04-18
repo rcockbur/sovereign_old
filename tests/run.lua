@@ -3,8 +3,14 @@
 
 package.path = "./src/?.lua;./tests/?.lua;" .. package.path
 
+require("core.util")
+require("config.constants")
+require("config.keybinds")
+require("config.tables")
+
 local test_files = {
     require("test_pathfinding"),
+    require("test_resources"),
 }
 
 local passed = 0

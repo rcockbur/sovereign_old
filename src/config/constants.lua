@@ -107,20 +107,12 @@ TILE_SIZE = 32
 ZOOM_MIN  = 0.5
 ZOOM_MAX  = 2.0
 
+-- Debug flags
+DEBUG_VALIDATE_RESOURCE_COUNTS = false
+
 -- Day and season names (indexed 1-based)
 DAY_NAMES    = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
 SEASON_NAMES = { "Spring", "Summer", "Autumn", "Winter" }
-
--- Tile index helpers
-function tileIndex(x, y)
-    return (x - 1) * MAP_HEIGHT + y
-end
-
-function tileXY(index)
-    local x = math.floor((index - 1) / MAP_HEIGHT) + 1
-    local y = (index - 1) % MAP_HEIGHT + 1
-    return x, y
-end
 
 -- Map generation parameters (tune by adjusting these constants)
 GEN_WATER_FREQ            = 0.03

@@ -10,6 +10,7 @@ if ARGS_DEBUG then
     require("lldebugger").start()
 end
 
+require("core.util")
 require("config.constants")
 require("config.keybinds")
 require("config.tables")
