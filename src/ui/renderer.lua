@@ -26,12 +26,13 @@ local function unitScreenPos(u, ts, half)
     return px, py
 end
 
-local COLOR_GRASS = { 0.35, 0.55, 0.25 }
-local COLOR_WATER = { 0.20, 0.40, 0.75 }
-local COLOR_ROCK  = { 0.50, 0.50, 0.50 }
-local COLOR_TREE  = { 0.15, 0.35, 0.10 }
-local COLOR_BERRY = { 0.55, 0.25, 0.65 }
-local COLOR_UNIT  = { 0.90, 0.75, 0.20 }
+local COLOR_GRASS     = { 0.35, 0.55, 0.25 }
+local COLOR_WATER     = { 0.20, 0.40, 0.75 }
+local COLOR_ROCK      = { 0.50, 0.50, 0.50 }
+local COLOR_TREE      = { 0.15, 0.35, 0.10 }
+local COLOR_BERRY     = { 0.55, 0.25, 0.65 }
+local COLOR_UNIT      = { 0.90, 0.75, 0.20 }
+local COLOR_STOCKPILE = { 0.65, 0.55, 0.35 }
 
 function renderer.drawWorld()
     local sw, sh = love.graphics.getDimensions()
@@ -90,6 +91,38 @@ function renderer.drawUnits()
     end
 end
 
+function renderer.drawBuildings()
+    local sw, sh = love.graphics.getDimensions()
+    local z      = camera.zoom
+    local left   = camera.x - sw / (2 * z)
+    local right  = camera.x + sw / (2 * z)
+    local top    = camera.y - sh / (2 * z)
+    local bottom = camera.y + sh / (2 * z)
+    local vx_min = math.floor(left   / TILE_SIZE) + 1
+    local vx_max = math.ceil( right  / TILE_SIZE)
+    local vy_min = math.floor(top    / TILE_SIZE) + 1
+    local vy_max = math.ceil( bottom / TILE_SIZE)
+
+    local ts = TILE_SIZE
+    for i = 1, #world.buildings do
+        local b = world.buildings[i]
+        if b.type == "stockpile" then
+            local x_min = math.max(b.x,                 vx_min)
+            local x_max = math.min(b.x + b.width  - 1,  vx_max)
+            local y_min = math.max(b.y,                 vy_min)
+            local y_max = math.min(b.y + b.height - 1,  vy_max)
+            if x_min <= x_max and y_min <= y_max then
+                love.graphics.setColor(COLOR_STOCKPILE)
+                for x = x_min, x_max do
+                    for y = y_min, y_max do
+                        love.graphics.rectangle("fill", (x - 1) * ts, (y - 1) * ts, ts, ts)
+                    end
+                end
+            end
+        end
+    end
+end
+
 function renderer.drawSelection(selected, selected_type, tile_idx)
     if selected == nil then return end
     love.graphics.setColor(1, 1, 1, 0.7)
@@ -100,6 +133,11 @@ function renderer.drawSelection(selected, selected_type, tile_idx)
         local r      = half * 0.4
         local px, py = unitScreenPos(selected, ts, half)
         love.graphics.circle("line", px, py, r + 3)
+    elseif selected_type == "building" then
+        local ts = TILE_SIZE
+        love.graphics.rectangle("line",
+            (selected.x - 1) * ts, (selected.y - 1) * ts,
+            selected.width * ts, selected.height * ts)
     else
         local x, y = tileXY(tile_idx)
         local px   = (x - 1) * TILE_SIZE

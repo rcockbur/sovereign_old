@@ -21,6 +21,7 @@ end
 
 function playing.update(dt)
     camera.update(dt)
+    hub.update()
 
     local ticks = time.accumulate(dt)
     for _ = 1, ticks do
@@ -34,8 +35,10 @@ function playing.draw()
     love.graphics.push()
     camera.applyTransform()
     renderer.drawWorld()
+    renderer.drawBuildings()
     renderer.drawUnits()
     renderer.drawSelection(hub.selected, hub.selected_type, hub.selected_tile)
+    hub.drawWorld()
     love.graphics.pop()
 
     hub.draw()
@@ -73,6 +76,7 @@ function playing.mousepressed(x, y, button)
 end
 
 function playing.mousereleased(x, y, button)
+    hub.mousereleased(x, y, button)
     camera.mousereleased(x, y, button)
 end
 
