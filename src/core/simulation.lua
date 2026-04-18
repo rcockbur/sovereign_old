@@ -9,6 +9,7 @@ local simulation = {}
 function simulation.onTick()
     time.advance()
     units.tickAll()
+    units.update()
 end
 
 return simulation

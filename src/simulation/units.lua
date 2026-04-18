@@ -5,6 +5,7 @@ local world       = require("core.world")
 local registry    = require("core.registry")
 local log         = require("core.log")
 local pathfinding = require("core.pathfinding")
+local time        = require("core.time")
 
 local units = {}
 
@@ -157,6 +158,20 @@ function units.tickAll()
         local unit = world.units[i]
         if unit.is_dead == false then
             unit:tick()
+        end
+    end
+end
+
+function Unit:hashedUpdate()
+end
+
+function units.update()
+    for i = 1, #world.units do
+        local unit = world.units[i]
+        if unit.is_dead == false then
+            if (world.time.tick + time.hashOffset(unit.id)) % HASH_INTERVAL == 0 then
+                unit:hashedUpdate()
+            end
         end
     end
 end
