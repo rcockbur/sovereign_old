@@ -25,7 +25,7 @@ local SPEED_LIST = {
     Speed.ULTRA,  Speed.TURBO, Speed.MAX,
 }
 
-local btn_rects = {}
+local btn_rects = { {}, {}, {}, {}, {}, {}, {} }
 
 local function formatTime(hour, minute)
     local period = hour < 12 and "AM" or "PM"
@@ -55,7 +55,6 @@ function right_panel.draw()
     love.graphics.print(formatTime(wt.game_hour, wt.game_minute), px + PANEL_PAD, PANEL_PAD + lh)
 
     local by = PANEL_PAD + lh * 2 + 6
-    btn_rects = {}
 
     for i = 1, 6 do
         local bx        = px + PANEL_PAD + (i - 1) * (BTN_W + BTN_GAP)
@@ -64,7 +63,8 @@ function right_panel.draw()
         love.graphics.rectangle("fill", bx, by, BTN_W, BTN_H, 2, 2)
         love.graphics.setColor(COL_TEXT)
         love.graphics.printf(tostring(i), bx, by + (BTN_H - fh) * 0.5, BTN_W, "center")
-        btn_rects[i] = { x = bx, y = by, w = BTN_W, h = BTN_H, speed = SPEED_LIST[i] }
+        local b = btn_rects[i]
+        b.x = bx;  b.y = by;  b.w = BTN_W;  b.h = BTN_H;  b.speed = SPEED_LIST[i]
     end
 
     local pause_x = px + PANEL_PAD + 6 * (BTN_W + BTN_GAP) + 4
@@ -73,7 +73,8 @@ function right_panel.draw()
     love.graphics.rectangle("fill", pause_x, by, pause_w, BTN_H, 2, 2)
     love.graphics.setColor(COL_TEXT)
     love.graphics.printf(world.time.is_paused == true and ">" or "||", pause_x, by + (BTN_H - fh) * 0.5, pause_w, "center")
-    btn_rects[7] = { x = pause_x, y = by, w = pause_w, h = BTN_H, is_pause = true }
+    local pb = btn_rects[7]
+    pb.x = pause_x;  pb.y = by;  pb.w = pause_w;  pb.h = BTN_H;  pb.is_pause = true
 end
 
 -- Returns true if the click was consumed (inside the panel area).

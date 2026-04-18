@@ -7,6 +7,25 @@ local camera   = require("ui.camera")
 
 local renderer = {}
 
+local function unitScreenPos(u, ts, half)
+    local px = (u.x - 1) * ts + half
+    local py = (u.y - 1) * ts + half
+    if u.path ~= nil then
+        local next_idx  = u.path.tiles[u.path.current]
+        local nx, ny    = tileXY(next_idx)
+        local tile_cost = world.getTileCost(world.tiles[next_idx])
+        if tile_cost ~= nil then
+            local dx = math.abs(nx - u.x)
+            local dy = math.abs(ny - u.y)
+            if dx == 1 and dy == 1 then tile_cost = tile_cost * SQRT2 end
+            local lerp_t = math.min(u.move_progress / tile_cost, 1.0)
+            px = px + (nx - u.x) * ts * lerp_t
+            py = py + (ny - u.y) * ts * lerp_t
+        end
+    end
+    return px, py
+end
+
 local COLOR_GRASS = { 0.35, 0.55, 0.25 }
 local COLOR_WATER = { 0.20, 0.40, 0.75 }
 local COLOR_ROCK  = { 0.50, 0.50, 0.50 }
@@ -64,23 +83,7 @@ function renderer.drawUnits()
     for i = 1, #world.units do
         local u = world.units[i]
         if u.is_dead == false then
-            local px = (u.x - 1) * ts + half
-            local py = (u.y - 1) * ts + half
-
-            if u.path ~= nil then
-                local next_idx  = u.path.tiles[u.path.current]
-                local nx, ny    = tileXY(next_idx)
-                local tile_cost = world.getTileCost(world.tiles[next_idx])
-                if tile_cost ~= nil then
-                    local dx = math.abs(nx - u.x)
-                    local dy = math.abs(ny - u.y)
-                    if dx == 1 and dy == 1 then tile_cost = tile_cost * SQRT2 end
-                    local lerp_t = math.min(u.move_progress / tile_cost, 1.0)
-                    px = px + (nx - u.x) * ts * lerp_t
-                    py = py + (ny - u.y) * ts * lerp_t
-                end
-            end
-
+            local px, py = unitScreenPos(u, ts, half)
             love.graphics.setColor(COLOR_UNIT)
             love.graphics.circle("fill", px, py, r)
         end
@@ -92,27 +95,10 @@ function renderer.drawSelection(selected, selected_type, tile_idx)
     love.graphics.setColor(1, 1, 1, 0.7)
 
     if selected_type == "unit" then
-        local ts   = TILE_SIZE
-        local half = ts * 0.5
-        local r    = half * 0.4
-        local u    = selected
-        local px   = (u.x - 1) * ts + half
-        local py   = (u.y - 1) * ts + half
-
-        if u.path ~= nil then
-            local next_idx  = u.path.tiles[u.path.current]
-            local nx, ny    = tileXY(next_idx)
-            local tile_cost = world.getTileCost(world.tiles[next_idx])
-            if tile_cost ~= nil then
-                local dx = math.abs(nx - u.x)
-                local dy = math.abs(ny - u.y)
-                if dx == 1 and dy == 1 then tile_cost = tile_cost * SQRT2 end
-                local lerp_t = math.min(u.move_progress / tile_cost, 1.0)
-                px = px + (nx - u.x) * ts * lerp_t
-                py = py + (ny - u.y) * ts * lerp_t
-            end
-        end
-
+        local ts     = TILE_SIZE
+        local half   = ts * 0.5
+        local r      = half * 0.4
+        local px, py = unitScreenPos(selected, ts, half)
         love.graphics.circle("line", px, py, r + 3)
     else
         local x, y = tileXY(tile_idx)
