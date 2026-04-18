@@ -123,6 +123,37 @@ function renderer.drawBuildings()
     end
 end
 
+local COLOR_DESIG_CHOP = { 0.95, 0.65, 0.10, 0.55 }
+
+function renderer.drawDesignations()
+    local sw, sh = love.graphics.getDimensions()
+    local z      = camera.zoom
+    local left   = camera.x - sw / (2 * z)
+    local right  = camera.x + sw / (2 * z)
+    local top    = camera.y - sh / (2 * z)
+    local bottom = camera.y + sh / (2 * z)
+
+    local x_min = math.max(1,          math.floor(left   / TILE_SIZE) + 1)
+    local x_max = math.min(MAP_WIDTH,  math.ceil( right  / TILE_SIZE))
+    local y_min = math.max(1,          math.floor(top    / TILE_SIZE) + 1)
+    local y_max = math.min(MAP_HEIGHT, math.ceil( bottom / TILE_SIZE))
+
+    local ts   = TILE_SIZE
+    local pad  = math.floor(ts * 0.2)
+    local size = ts - pad * 2
+
+    for x = x_min, x_max do
+        for y = y_min, y_max do
+            local t = world.tiles[tileIndex(x, y)]
+            if t.designation == "chop" then
+                love.graphics.setColor(COLOR_DESIG_CHOP)
+                love.graphics.rectangle("fill",
+                    (x - 1) * ts + pad, (y - 1) * ts + pad, size, size)
+            end
+        end
+    end
+end
+
 function renderer.drawSelection(selected, selected_type, tile_idx)
     if selected == nil then return end
     love.graphics.setColor(1, 1, 1, 0.7)

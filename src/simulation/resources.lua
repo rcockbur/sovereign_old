@@ -687,4 +687,22 @@ function resources.validateCounts()
     assertMatch("equipped")
 end
 
+function resources.findNearestStorage(unit, type)
+    local best_dist     = nil
+    local best_building = nil
+    for i = 1, #world.buildings do
+        local b = world.buildings[i]
+        if b.is_deleted == false and b.storage ~= nil then
+            if resources.getAvailableCapacity(b.storage, type) > 0 then
+                local dist = math.abs(unit.x - b.x) + math.abs(unit.y - b.y)
+                if best_dist == nil or dist < best_dist then
+                    best_dist     = dist
+                    best_building = b
+                end
+            end
+        end
+    end
+    return best_building
+end
+
 return resources

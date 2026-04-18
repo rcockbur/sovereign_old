@@ -7,6 +7,7 @@ local log         = require("core.log")
 local pathfinding = require("core.pathfinding")
 local time        = require("core.time")
 local activities  = require("simulation.activities")
+local resources   = require("simulation.resources")
 
 local units = {}
 
@@ -150,6 +151,12 @@ function Unit:moveStep()
     end
 end
 
+function Unit:carryableAmount(type)
+    local used      = resources.countWeight(self.carrying)
+    local remaining = CARRY_WEIGHT_MAX - used
+    return math.floor(remaining / ResourceConfig[type].weight)
+end
+
 function Unit:workStep()
     local action = self.current_action
     action.progress = action.progress + 1
@@ -260,6 +267,25 @@ function units.startMove(unit, goal_idx)
             world.tiles[old_target_idx].target_of_unit = unit.id
         end
         return false
+    end
+
+    unit.path          = path
+    unit.move_progress = 0
+    return true
+end
+
+function units.startMoveAdjacentToRect(unit, rx, ry, rw, rh)
+    local start_idx = tileIndex(unit.x, unit.y)
+    local path = pathfinding.findPathAdjacentToRect(world.tiles, start_idx, rx, ry, rw, rh)
+    if path == nil then return false end
+
+    if #path.tiles > 0 then
+        local goal_idx = path.tiles[#path.tiles]
+        if unit.target_tile ~= nil then
+            world.tiles[unit.target_tile].target_of_unit = nil
+        end
+        world.tiles[goal_idx].target_of_unit = unit.id
+        unit.target_tile = goal_idx
     end
 
     unit.path          = path

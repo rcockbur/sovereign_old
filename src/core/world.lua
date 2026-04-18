@@ -346,9 +346,11 @@ newTile = function()
         forest_depth   = 0.0,
         is_explored    = false,
         visible_count  = 0,
-        claimed_by     = nil,
-        target_of_unit = nil,
-        unit_ids       = {},
+        claimed_by              = nil,
+        target_of_unit          = nil,
+        unit_ids                = {},
+        designation             = nil,
+        designation_activity_id = nil,
     }
 end
 

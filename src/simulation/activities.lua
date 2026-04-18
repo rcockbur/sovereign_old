@@ -2,9 +2,10 @@
 -- Activity lifecycle: posting, claiming, removal, scoring, and handlers.
 -- ActivityHandlers lives here — activity system owns the full lifecycle.
 
-local world    = require("core.world")
-local registry = require("core.registry")
-local log      = require("core.log")
+local world     = require("core.world")
+local registry  = require("core.registry")
+local log       = require("core.log")
+local resources = require("simulation.resources")
 
 local activities = {}
 
@@ -146,6 +147,27 @@ function activities.pollBest(unit)
     return best_activity
 end
 
+-- ─── Designation helpers ──────────────────────────────────────────────────────
+
+function activities.cancelDesignation(tile_idx)
+    local tile = world.tiles[tile_idx]
+    if tile.designation == nil then return end
+    local act_id = tile.designation_activity_id
+    tile.designation             = nil
+    tile.designation_activity_id = nil
+    if act_id ~= nil then
+        local act = registry[act_id]
+        if act ~= nil and act.worker_id ~= nil then
+            local worker = registry[act.worker_id]
+            if worker ~= nil then
+                worker.claimed_tile = nil
+            end
+        end
+        tile.claimed_by = nil
+        activities.removeActivity(act_id)
+    end
+end
+
 -- ─── Handlers ─────────────────────────────────────────────────────────────────
 
 -- units module is required lazily to avoid a circular require at load time.
@@ -180,6 +202,135 @@ ActivityHandlers["fisher"] = {
         elseif action_type == "work" then
             log:info("ACTIVITY", "Unit %d (%s) finished work at (%d,%d)",
                 unit.id, unit.name, activity.x, activity.y)
+            activities.removeActivity(activity.id)
+            unit.current_action = { type = "idle" }
+        end
+    end
+}
+
+local function findNearestDesignation(unit, act_type)
+    local best_dist = nil
+    local best_act  = nil
+    for i = 1, #world.activities do
+        local a = world.activities[i]
+        if a.type == act_type and a.worker_id == nil then
+            local dist = math.abs(unit.x - a.x) + math.abs(unit.y - a.y)
+            if best_dist == nil or dist < best_dist then
+                best_dist = dist
+                best_act  = a
+            end
+        end
+    end
+    return best_act
+end
+
+ActivityHandlers["woodcutter"] = {
+    nextAction = function(unit, activity)
+        local phase = activity.phase
+
+        if phase == nil then
+            -- Claim the resource tile and path adjacent to it
+            local tile_idx = tileIndex(activity.x, activity.y)
+            local tile     = world.tiles[tile_idx]
+            tile.claimed_by   = unit.id
+            unit.claimed_tile = tile_idx
+            if getUnits().startMoveAdjacentToRect(unit, activity.x, activity.y, 1, 1) then
+                activity.phase      = "travel_tree"
+                unit.current_action = { type = "travel" }
+            else
+                tile.claimed_by   = nil
+                unit.claimed_tile = nil
+                if tile.designation_activity_id == activity.id then
+                    tile.designation             = nil
+                    tile.designation_activity_id = nil
+                end
+                activities.removeActivity(activity.id)
+                unit.current_action = { type = "idle" }
+            end
+
+        elseif phase == "travel_tree" then
+            -- Arrived adjacent to tree: validate plant still exists
+            local tile = world.tiles[tileIndex(activity.x, activity.y)]
+            if tile.plant_type == nil then
+                if unit.claimed_tile ~= nil then
+                    world.tiles[unit.claimed_tile].claimed_by = nil
+                    unit.claimed_tile = nil
+                end
+                if tile.designation_activity_id == activity.id then
+                    tile.designation             = nil
+                    tile.designation_activity_id = nil
+                end
+                activities.removeActivity(activity.id)
+                unit.current_action = { type = "idle" }
+                return
+            end
+            activity.phase = "work"
+            unit.current_action = {
+                type       = "work",
+                progress   = 0,
+                work_ticks = PlantConfig[tile.plant_type].harvest_ticks,
+            }
+
+        elseif phase == "work" then
+            -- Chop complete: remove tree, grant wood, clear tile
+            local tile_idx  = tileIndex(activity.x, activity.y)
+            local tile      = world.tiles[tile_idx]
+            local plant_cfg = PlantConfig["tree"]
+
+            tile.plant_type  = nil
+            tile.plant_growth = 0
+            tile.claimed_by   = nil
+            unit.claimed_tile = nil
+            tile.designation             = nil
+            tile.designation_activity_id = nil
+
+            resources.carryResource(unit, "wood", plant_cfg.harvest_yield)
+            log:info("ACTIVITY", "Unit %d (%s) chopped tree at (%d,%d), carrying %d wood",
+                unit.id, unit.name, activity.x, activity.y,
+                resources.countWeight(unit.carrying) / ResourceConfig["wood"].weight)
+
+            -- Chain: can carry another yield AND an unclaimed designation exists?
+            if unit:carryableAmount("wood") >= plant_cfg.harvest_yield then
+                local next_act = findNearestDesignation(unit, "woodcutter")
+                if next_act ~= nil then
+                    activities.removeActivity(activity.id)
+                    activities.claimActivity(unit, next_act)
+                    activities.handlers["woodcutter"].nextAction(unit, next_act)
+                    return
+                end
+            end
+
+            -- Self-deposit: keep activity alive to drive the deposit travel
+            local storage = resources.findNearestStorage(unit, "wood")
+            if storage ~= nil then
+                activity.phase      = "travel_deposit"
+                activity.storage_id = storage.id
+                if getUnits().startMoveAdjacentToRect(
+                    unit, storage.x, storage.y, storage.width, storage.height) then
+                    unit.current_action = { type = "travel" }
+                else
+                    activities.removeActivity(activity.id)
+                    unit.current_action = { type = "idle" }
+                end
+            else
+                activities.removeActivity(activity.id)
+                unit.current_action = { type = "idle" }
+            end
+
+        elseif phase == "travel_deposit" then
+            -- Arrived at stockpile: deposit all wood
+            local storage = registry[activity.storage_id]
+            if storage ~= nil and #unit.carrying > 0 then
+                local stack = registry[unit.carrying[1]]
+                if stack ~= nil then
+                    local ids = resources.withdrawFromCarrying(unit, stack.type, stack.amount)
+                    for i = 1, #ids do
+                        resources.deposit(storage.storage, ids[i])
+                    end
+                    log:info("ACTIVITY", "Unit %d (%s) deposited wood at building %d",
+                        unit.id, unit.name, storage.id)
+                end
+            end
             activities.removeActivity(activity.id)
             unit.current_action = { type = "idle" }
         end

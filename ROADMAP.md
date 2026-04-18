@@ -51,6 +51,9 @@
 **M14**
 - Implemented without issue.
 
+**M15**
+- Implemented without issue. Self-deposit uses simplified direct path+deposit (no reservation) as agreed; reservation system deferred to M16. Hub unified into hub.mode / hub.mode_state enum (replacing the old placement-only table).
+
 ## Phase 1 Milestones
 
 Granular implementation milestones for Phase 1 (Survival). Claude Code implements these one at a time in order. Each milestone builds on the last — later milestones assume all earlier ones are complete.
