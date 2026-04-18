@@ -8,6 +8,8 @@ local units        = require("simulation.units")
 local camera       = require("ui.camera")
 local renderer     = require("ui.renderer")
 local hub          = require("ui.hub")
+local right_panel  = require("ui.right_panel")
+local dev_overlay  = require("ui.dev_overlay")
 
 local playing = {}
 
@@ -37,6 +39,8 @@ function playing.draw()
     love.graphics.pop()
 
     hub.draw()
+    right_panel.draw()
+    dev_overlay.draw()
 end
 
 function playing.keypressed(key)
@@ -57,10 +61,13 @@ function playing.keypressed(key)
         time.setSpeed(Speed.TURBO)
     elseif key == Keybinds.speed_6 then
         time.setSpeed(Speed.MAX)
+    elseif key == "f3" then
+        dev_overlay.toggle()
     end
 end
 
 function playing.mousepressed(x, y, button)
+    if right_panel.mousepressed(x, y, button) then return end
     hub.mousepressed(x, y, button)
     camera.mousepressed(x, y, button)
 end
