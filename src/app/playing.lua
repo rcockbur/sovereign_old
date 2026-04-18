@@ -6,6 +6,7 @@ local time         = require("core.time")
 local simulation   = require("core.simulation")
 local units        = require("simulation.units")
 local resources    = require("simulation.resources")
+local activities   = require("simulation.activities")
 local world        = require("core.world")
 local log          = require("core.log")
 local camera       = require("ui.camera")
@@ -21,6 +22,11 @@ function playing.enter()
     camera.init()
     units.spawnStarting()
     resources.rebuildCounts()
+    -- M14 debug: three test activities for verifying the activity system.
+    -- Units will claim, travel to, work at, and release these on their own.
+    activities.postActivity({ type = "fisher", x = 85,  y = 100 })
+    activities.postActivity({ type = "fisher", x = 115, y = 100 })
+    activities.postActivity({ type = "fisher", x = 100, y = 85  })
 end
 
 function playing.update(dt)

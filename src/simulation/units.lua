@@ -6,6 +6,7 @@ local registry    = require("core.registry")
 local log         = require("core.log")
 local pathfinding = require("core.pathfinding")
 local time        = require("core.time")
+local activities  = require("simulation.activities")
 
 local units = {}
 
@@ -149,8 +150,54 @@ function Unit:moveStep()
     end
 end
 
+function Unit:workStep()
+    local action = self.current_action
+    action.progress = action.progress + 1
+    return action.progress >= action.work_ticks
+end
+
+function Unit:onActionComplete()
+    -- 1. Soft interrupt at clean break (M18)
+    -- 2. Idle + carrying → offload (M16)
+
+    -- 3. No activity → idle
+    if self.activity_id == nil then
+        self.current_action = { type = "idle" }
+        return
+    end
+
+    -- 4. Activity handler decides next action
+    local activity = registry[self.activity_id]
+    activities.handlers[activity.type].nextAction(self, activity)
+end
+
 function Unit:tick()
-    self:moveStep()
+    local action    = self.current_action
+    local completed = false
+
+    if action.type == "travel" then
+        local had_path = self.path ~= nil
+        self:moveStep()
+        if had_path and self.path == nil then
+            completed = true
+        end
+    elseif action.type == "work" then
+        completed = self:workStep()
+    end
+
+    -- Per-tick step 2: decrement work day counter for work-purpose activities
+    if self.activity_id ~= nil then
+        local act = registry[self.activity_id]
+        if act ~= nil and act.purpose == "work" then
+            if self.work_ticks_remaining > 0 then
+                self.work_ticks_remaining = self.work_ticks_remaining - 1
+            end
+        end
+    end
+
+    if completed then
+        self:onActionComplete()
+    end
 end
 
 function units.tickAll()
@@ -163,6 +210,22 @@ function units.tickAll()
 end
 
 function Unit:hashedUpdate()
+    if self.is_drafted then return end
+
+    -- Steps 1–5: needs drain, interrupts, equipment wants, work day (M18+)
+
+    -- Step 6: Activity polling
+    if self.current_action.type == "idle" and self.activity_id == nil then
+        if self.class ~= "gentry" and self.is_done_working == false then
+            local best = activities.pollBest(self)
+            if best ~= nil then
+                activities.claimActivity(self, best)
+                log:info("ACTIVITY", "Unit %d (%s) claimed %s activity %d at (%d,%d)",
+                    self.id, self.name, best.type, best.id, best.x, best.y)
+                self:onActionComplete()
+            end
+        end
+    end
 end
 
 function units.update()

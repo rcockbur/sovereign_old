@@ -1,5 +1,8 @@
 -- ui/left_panel.lua
 -- Left panel: live debug dump of the selected entity.
+-- Units use a curated layout; tiles and buildings use the generic recursive dump.
+
+local registry = require("core.registry")
 
 local left_panel = {}
 
@@ -8,23 +11,25 @@ local PANEL_PAD = 8
 local MAX_ARRAY = 8
 local MAX_DEPTH = 5
 
-local COL_BG     = { 0.08, 0.09, 0.10, 0.94 }
-local COL_BORDER = { 0.25, 0.27, 0.28, 1.00 }
-local COL_HEADER = { 0.85, 0.80, 0.55, 1.00 }
-local COL_TEXT   = { 0.78, 0.80, 0.78, 1.00 }
+local COL_BG      = { 0.08, 0.09, 0.10, 0.94 }
+local COL_BORDER  = { 0.25, 0.27, 0.28, 1.00 }
+local COL_HEADER  = { 0.85, 0.80, 0.55, 1.00 }
+local COL_TEXT    = { 0.78, 0.80, 0.78, 1.00 }
+local COL_SECTION = { 0.55, 0.65, 0.75, 1.00 }
+
+-- ─── Generic recursive dump (tiles, buildings) ────────────────────────────────
 
 local function buildLines(val, depth, lines, indent)
     if depth > MAX_DEPTH then
-        lines[#lines + 1] = indent .. "..."
+        lines[#lines + 1] = { text = indent .. "...", color = COL_TEXT }
         return
     end
 
     if type(val) ~= "table" then
-        lines[#lines + 1] = indent .. tostring(val)
+        lines[#lines + 1] = { text = indent .. tostring(val), color = COL_TEXT }
         return
     end
 
-    -- String keys (sorted, capped at MAX_ARRAY)
     local str_keys = {}
     for k in pairs(val) do
         if type(k) == "string" then str_keys[#str_keys + 1] = k end
@@ -35,35 +40,33 @@ local function buildLines(val, depth, lines, indent)
         local k = str_keys[i]
         local v = val[k]
         if type(v) == "table" then
-            lines[#lines + 1] = indent .. k .. ":"
+            lines[#lines + 1] = { text = indent .. k .. ":", color = COL_TEXT }
             buildLines(v, depth + 1, lines, indent .. "  ")
         else
-            lines[#lines + 1] = indent .. k .. ": " .. tostring(v)
+            lines[#lines + 1] = { text = indent .. k .. ": " .. tostring(v), color = COL_TEXT }
         end
     end
     if #str_keys > MAX_ARRAY then
-        lines[#lines + 1] = indent .. "(" .. (#str_keys - MAX_ARRAY) .. " more keys)"
+        lines[#lines + 1] = { text = indent .. "(" .. (#str_keys - MAX_ARRAY) .. " more keys)", color = COL_TEXT }
     end
 
-    -- Sequential integer keys [1..n]
     local n = #val
     if n > 0 then
         local limit = math.min(n, MAX_ARRAY)
         for i = 1, limit do
             local v = val[i]
             if type(v) == "table" then
-                lines[#lines + 1] = indent .. "[" .. i .. "]:"
+                lines[#lines + 1] = { text = indent .. "[" .. i .. "]:", color = COL_TEXT }
                 buildLines(v, depth + 1, lines, indent .. "  ")
             else
-                lines[#lines + 1] = indent .. "[" .. i .. "]: " .. tostring(v)
+                lines[#lines + 1] = { text = indent .. "[" .. i .. "]: " .. tostring(v), color = COL_TEXT }
             end
         end
         if n > MAX_ARRAY then
-            lines[#lines + 1] = indent .. "(" .. (n - MAX_ARRAY) .. " more)"
+            lines[#lines + 1] = { text = indent .. "(" .. (n - MAX_ARRAY) .. " more)", color = COL_TEXT }
         end
     end
 
-    -- Sparse non-sequential integer keys (e.g. tileIndex-keyed tables)
     local int_keys = {}
     for k in pairs(val) do
         if type(k) == "number" and (k < 1 or k > n or k ~= math.floor(k)) then
@@ -77,17 +80,135 @@ local function buildLines(val, depth, lines, indent)
             local k = int_keys[i]
             local v = val[k]
             if type(v) == "table" then
-                lines[#lines + 1] = indent .. "[" .. k .. "]:"
+                lines[#lines + 1] = { text = indent .. "[" .. k .. "]:", color = COL_TEXT }
                 buildLines(v, depth + 1, lines, indent .. "  ")
             else
-                lines[#lines + 1] = indent .. "[" .. k .. "]: " .. tostring(v)
+                lines[#lines + 1] = { text = indent .. "[" .. k .. "]: " .. tostring(v), color = COL_TEXT }
             end
         end
         if #int_keys > MAX_ARRAY then
-            lines[#lines + 1] = indent .. "(" .. (#int_keys - MAX_ARRAY) .. " more)"
+            lines[#lines + 1] = { text = indent .. "(" .. (#int_keys - MAX_ARRAY) .. " more)", color = COL_TEXT }
         end
     end
 end
+
+-- ─── Curated unit display ─────────────────────────────────────────────────────
+
+local function sec(lines, label)
+    lines[#lines + 1] = { text = label, color = COL_SECTION }
+end
+
+local function row(lines, text)
+    lines[#lines + 1] = { text = text, color = COL_TEXT }
+end
+
+local function buildUnitLines(unit, lines)
+    -- Identity
+    row(lines, unit.name .. " " .. unit.surname .. "  #" .. unit.id)
+    row(lines, unit.class .. "  age " .. unit.age .. "  " .. unit.gender)
+    row(lines, "")
+
+    -- Position and movement
+    sec(lines, "position")
+    row(lines, "  x: " .. unit.x .. "  y: " .. unit.y)
+    if unit.target_tile ~= nil then
+        local tx, ty = tileXY(unit.target_tile)
+        row(lines, "  target: " .. tx .. ", " .. ty)
+    end
+    row(lines, "")
+
+    -- Action
+    sec(lines, "action")
+    local act = unit.current_action
+    if act.type == "work" then
+        row(lines, "  work  " .. act.progress .. " / " .. act.work_ticks)
+    elseif act.type == "travel" then
+        local step = unit.path and unit.path.current or "?"
+        local total = unit.path and #unit.path.tiles or "?"
+        row(lines, "  travel  step " .. tostring(step) .. " / " .. tostring(total))
+    else
+        row(lines, "  " .. act.type)
+    end
+
+    -- Activity
+    if unit.activity_id ~= nil then
+        local a = registry[unit.activity_id]
+        if a ~= nil then
+            local loc = "(" .. a.x .. "," .. a.y .. ")"
+            row(lines, "  activity: " .. a.type .. " #" .. a.id .. " " .. loc)
+        else
+            row(lines, "  activity: #" .. unit.activity_id .. " (stale)")
+        end
+    else
+        row(lines, "  activity: none")
+    end
+    if unit.secondary_haul_activity_id ~= nil then
+        local h = registry[unit.secondary_haul_activity_id]
+        if h ~= nil then
+            row(lines, "  haul: " .. h.type .. " #" .. h.id)
+        else
+            row(lines, "  haul: #" .. unit.secondary_haul_activity_id .. " (stale)")
+        end
+    end
+    row(lines, "")
+
+    -- Needs
+    sec(lines, "needs")
+    row(lines, "  satiation:  " .. math.floor(unit.needs.satiation))
+    row(lines, "  energy:     " .. math.floor(unit.needs.energy))
+    row(lines, "  recreation: " .. math.floor(unit.needs.recreation))
+    row(lines, "")
+
+    -- Vitals
+    sec(lines, "vitals")
+    row(lines, "  health: " .. math.floor(unit.health)
+        .. "  mood: " .. math.floor(unit.mood))
+    if unit.soft_interrupt_pending then
+        row(lines, "  soft interrupt pending")
+    end
+    row(lines, "")
+
+    -- Carrying
+    sec(lines, "carrying")
+    if #unit.carrying == 0 then
+        row(lines, "  (empty)")
+    else
+        for i = 1, #unit.carrying do
+            local e = registry[unit.carrying[i]]
+            if e ~= nil then
+                if e.amount ~= nil then
+                    row(lines, "  " .. e.type .. " x" .. e.amount)
+                else
+                    row(lines, "  " .. e.type .. " (item)")
+                end
+            end
+        end
+    end
+    row(lines, "")
+
+    -- Work day
+    sec(lines, "work day")
+    local rem  = unit.work_ticks_remaining
+    local wh   = math.floor(rem / TICKS_PER_HOUR)
+    local wm   = math.floor((rem % TICKS_PER_HOUR) / TICKS_PER_MINUTE)
+    row(lines, "  remaining: " .. wh .. "h " .. wm .. "m")
+    row(lines, "  done: " .. tostring(unit.is_done_working))
+    row(lines, "")
+
+    -- Home / draft
+    sec(lines, "housing")
+    if unit.home_id ~= nil then
+        row(lines, "  home: #" .. unit.home_id
+            .. "  bed: " .. tostring(unit.bed_index))
+    else
+        row(lines, "  home: none")
+    end
+    if unit.is_drafted then
+        row(lines, "  DRAFTED")
+    end
+end
+
+-- ─── Draw ─────────────────────────────────────────────────────────────────────
 
 function left_panel.draw(selected, selected_type)
     if selected == nil then return end
@@ -97,7 +218,11 @@ function left_panel.draw(selected, selected_type)
     local line_h = fh + 2
 
     local lines = {}
-    buildLines(selected, 0, lines, "")
+    if selected_type == "unit" then
+        buildUnitLines(selected, lines)
+    else
+        buildLines(selected, 0, lines, "")
+    end
 
     love.graphics.setColor(COL_BG)
     love.graphics.rectangle("fill", 0, 0, PANEL_W, sh)
@@ -110,9 +235,10 @@ function left_panel.draw(selected, selected_type)
     local y_off     = PANEL_PAD + line_h + 4
     local max_lines = math.floor((sh - y_off - PANEL_PAD) / line_h)
 
-    love.graphics.setColor(COL_TEXT)
     for i = 1, math.min(#lines, max_lines) do
-        love.graphics.print(lines[i], PANEL_PAD, y_off + (i - 1) * line_h)
+        local entry = lines[i]
+        love.graphics.setColor(entry.color)
+        love.graphics.print(entry.text, PANEL_PAD, y_off + (i - 1) * line_h)
     end
 end
 

@@ -68,7 +68,7 @@ SIGHT_RADIUS        = 8
 FOREST_SIGHT_RADIUS = 3
 
 -- Movement
-BASE_MOVE_COST       = 6        -- ticks per tile on open ground
+BASE_MOVE_COST       = 40        -- ticks per tile on open ground
 TREE_MOVE_MULTIPLIER = 3.0      -- trees stage 2+ slow movement
 SQRT2                = math.sqrt(2)
 
