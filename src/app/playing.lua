@@ -22,11 +22,6 @@ function playing.enter()
     camera.init()
     units.spawnStarting()
     resources.rebuildCounts()
-    -- M14 debug: three test activities for verifying the activity system.
-    -- Units will claim, travel to, work at, and release these on their own.
-    activities.postActivity({ type = "fisher", x = 85,  y = 100 })
-    activities.postActivity({ type = "fisher", x = 115, y = 100 })
-    activities.postActivity({ type = "fisher", x = 100, y = 85  })
 end
 
 function playing.update(dt)
@@ -46,9 +41,10 @@ function playing.draw()
     camera.applyTransform()
     renderer.drawWorld()
     renderer.drawBuildings()
+    renderer.drawGroundPiles()
     renderer.drawDesignations()
     renderer.drawUnits()
-    renderer.drawSelection(hub.selected, hub.selected_type, hub.selected_tile)
+    renderer.drawSelection(hub.selected, hub.selected_type, hub.selected_tile_idx)
     hub.drawWorld()
     love.graphics.pop()
 

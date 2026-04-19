@@ -460,12 +460,12 @@ Random first name from `NameConfig.male` or `NameConfig.female` based on `unit.g
 
 ## Pending Review
 
-**M13 — Resources API gaps (action required at M16/M19):**
+**M13 — Resources API gaps (action required at M19):**
 
 - **`bin` container needs `category` field** — `containerCategory` dispatches on `container.category` to determine the resource_counts category ("housing", "processing", etc.). The bin spec in ECONOMY.md doesn't include this field. When housing bins are created (M19) and processing input bins (M20+), each bin must be initialized with a `category` field matching its role.
 
-- **`reserve` missing assertions on non-tile containers** — For `stack_inventory`, `item_inventory`, `bin`, and `ground_pile`, `reserve` increments without checking available stock ("out") or available capacity ("in"). Spec requires these asserts. Add before M16 when hauling begins using reservations.
+**M16 — Reservation model and partial-fill deviations from spec (update ECONOMY.md and BEHAVIOR.md):**
 
-- **`releaseReservation` missing over-release assertion** — For non-tile containers, releasing more than `reserved_out`/`reserved_in` currently holds goes silently negative. For `tile_inventory`, partial release (loop releases less than requested) goes undetected. Spec requires asserts. Add before M16.
+- **Reservations are amount-based throughout; weight conversion is inside capacity calculations** — `reserved_in` and `reserved_out` are stored in item amounts on all container types (not weight units as ECONOMY.md specifies for `reserved_in`). `getAvailableCapacity` returns an item count and converts internally via `math.floor(physical_weight / item_weight) - reserved_in[type]`. `reserve`, `releaseReservation`, `deposit`, and `withdraw` all use item amounts. Update ECONOMY.md to reflect this model. Bins (M19) and item inventories (M20+) must follow the same convention.
 
-- **`ground_pile.reserved_out` is not per-type** — A single `reserved_out` on a ground pile is subtracted from `getAvailableStock` for any queried type, causing incorrect results when a pile contains multiple resource types with separate reservations. Spec posts one haul activity per type. Resolve when ground piles are implemented in M16.
+- **Partial-fill self-deposit** — The offload path in `onActionComplete` reserves only `math.min(stack.amount, getAvailableCapacity(...))` — if storage has less capacity than the unit is carrying, only that portion is delivered. After the partial haul completes, the unit's remaining carry re-triggers `onActionComplete`, which either deposits to another storage or ground-drops if none has capacity. BEHAVIOR.md does not describe this partial-fill-then-retry chain. Confirm intent and update BEHAVIOR.md when writing the eating / self-fetch behavior (M23), which uses the same offload path.

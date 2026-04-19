@@ -165,7 +165,35 @@ end
 
 function Unit:onActionComplete()
     -- 1. Soft interrupt at clean break (M18)
-    -- 2. Idle + carrying → offload (M16)
+
+    -- 2. Idle + carrying → offload
+    if self.activity_id == nil and #self.carrying > 0 then
+        local stack  = registry[self.carrying[1]]
+        local rtype  = stack.type
+        local dest   = resources.findNearestStorage(self, rtype, 1)
+        if dest ~= nil then
+            local reserve_amount = math.min(stack.amount, resources.getAvailableCapacity(dest.storage, rtype))
+            local act = activities.postActivity({
+                type            = "haul",
+                source_id       = nil,
+                destination_id  = dest.id,
+                resource_type   = rtype,
+                reserved_amount = reserve_amount,
+            })
+            resources.reserve(dest.storage, rtype, reserve_amount, "in")
+            activities.claimActivity(self, act)
+            log:info("HAUL", "Unit %d (%s) offloading %d %s to building %d",
+                self.id, self.name, reserve_amount, rtype, dest.id)
+            activities.handlers["haul"].nextAction(self, act)
+        else
+            local gp = resources.groundDrop(self)
+            if gp ~= nil then
+                activities.postGroundPileHaulIfNeeded(gp, rtype)
+            end
+            self.current_action = { type = "idle" }
+        end
+        return
+    end
 
     -- 3. No activity → idle
     if self.activity_id == nil then

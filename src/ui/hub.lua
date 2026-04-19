@@ -14,7 +14,7 @@ local hub = {}
 
 hub.selected      = nil
 hub.selected_type = nil
-hub.selected_tile = nil   -- flat tile index used by renderer for the highlight
+hub.selected_tile_idx = nil   -- flat tile index used by renderer for the highlight
 
 -- Interaction mode: "normal" | "placing" | "designating" | "cancelling"
 hub.mode = "normal"
@@ -33,7 +33,7 @@ end
 function hub.enterMode(mode, mtype)
     hub.selected      = nil
     hub.selected_type = nil
-    hub.selected_tile = nil
+    hub.selected_tile_idx = nil
     hub.mode = mode
     hub.mode_state.type     = mtype
     hub.mode_state.dragging = false
@@ -140,7 +140,7 @@ function hub.mousepressed(x, y, button)
         if tx < 1 or tx > MAP_WIDTH or ty < 1 or ty > MAP_HEIGHT then
             hub.selected      = nil
             hub.selected_type = nil
-            hub.selected_tile = nil
+            hub.selected_tile_idx = nil
             return
         end
 
@@ -152,7 +152,7 @@ function hub.mousepressed(x, y, button)
             if u.is_dead == false then
                 hub.selected      = u
                 hub.selected_type = "unit"
-                hub.selected_tile = tile_idx
+                hub.selected_tile_idx = tile_idx
                 return
             end
         end
@@ -160,13 +160,20 @@ function hub.mousepressed(x, y, button)
         if t.building_id ~= nil then
             hub.selected      = registry[t.building_id]
             hub.selected_type = "building"
-            hub.selected_tile = tile_idx
+            hub.selected_tile_idx = tile_idx
+            return
+        end
+
+        if t.ground_pile_id ~= nil then
+            hub.selected      = registry[t.ground_pile_id]
+            hub.selected_type = "ground pile"
+            hub.selected_tile_idx = tile_idx
             return
         end
 
         hub.selected      = t
         hub.selected_type = "tile"
-        hub.selected_tile = tile_idx
+        hub.selected_tile_idx = tile_idx
 
     elseif button == 2 then
         if hub.selected_type == "unit" then
@@ -176,7 +183,7 @@ function hub.mousepressed(x, y, button)
         else
             hub.selected      = nil
             hub.selected_type = nil
-            hub.selected_tile = nil
+            hub.selected_tile_idx = nil
         end
     end
 end
@@ -237,7 +244,7 @@ function hub.keypressed(key)
     if key == "escape" and hub.selected ~= nil then
         hub.selected      = nil
         hub.selected_type = nil
-        hub.selected_tile = nil
+        hub.selected_tile_idx = nil
         return true
     end
     return false

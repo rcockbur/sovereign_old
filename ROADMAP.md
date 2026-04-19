@@ -54,6 +54,9 @@
 **M15**
 - Implemented without issue. Self-deposit uses simplified direct path+deposit (no reservation) as agreed; reservation system deferred to M16. Hub unified into hub.mode / hub.mode_state enum (replacing the old placement-only table).
 
+**M16**
+- Implemented without issue. Offloading uses the full private haul activity path (activity_id, not secondary_haul_activity_id) as confirmed with user. Haul activity type is "haul" (special-cased in canClaim for serf class). Public ground pile haul activities are re-posted after each partial pickup trip.
+
 ## Phase 1 Milestones
 
 Granular implementation milestones for Phase 1 (Survival). Claude Code implements these one at a time in order. Each milestone builds on the last — later milestones assume all earlier ones are complete.

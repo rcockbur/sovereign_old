@@ -3,6 +3,7 @@
 -- Called inside a love.graphics.push/pop block with the camera transform applied.
 
 local world    = require("core.world")
+local registry = require("core.registry")
 local camera   = require("ui.camera")
 
 local renderer = {}
@@ -26,13 +27,14 @@ local function unitScreenPos(u, ts, half)
     return px, py
 end
 
-local COLOR_GRASS     = { 0.35, 0.55, 0.25 }
-local COLOR_WATER     = { 0.20, 0.40, 0.75 }
-local COLOR_ROCK      = { 0.50, 0.50, 0.50 }
-local COLOR_TREE      = { 0.15, 0.35, 0.10 }
-local COLOR_BERRY     = { 0.55, 0.25, 0.65 }
-local COLOR_UNIT      = { 0.90, 0.75, 0.20 }
-local COLOR_STOCKPILE = { 0.65, 0.55, 0.35 }
+local COLOR_GRASS          = { 0.35, 0.55, 0.25 }
+local COLOR_WATER          = { 0.20, 0.40, 0.75 }
+local COLOR_ROCK           = { 0.50, 0.50, 0.50 }
+local COLOR_TREE           = { 0.15, 0.35, 0.10 }
+local COLOR_BERRY          = { 0.55, 0.25, 0.65 }
+local COLOR_UNIT           = { 0.90, 0.75, 0.20 }
+local COLOR_STOCKPILE      = { 0.65, 0.55, 0.35 }
+local COLOR_STOCKPILE_FILL = { 0.35, 0.22, 0.08 }
 
 function renderer.drawWorld()
     local sw, sh = love.graphics.getDimensions()
@@ -112,10 +114,30 @@ function renderer.drawBuildings()
             local y_min = math.max(b.y,                 vy_min)
             local y_max = math.min(b.y + b.height - 1,  vy_max)
             if x_min <= x_max and y_min <= y_max then
-                love.graphics.setColor(COLOR_STOCKPILE)
                 for x = x_min, x_max do
                     for y = y_min, y_max do
-                        love.graphics.rectangle("fill", (x - 1) * ts, (y - 1) * ts, ts, ts)
+                        local px = (x - 1) * ts
+                        local py = (y - 1) * ts
+                        love.graphics.setColor(COLOR_STOCKPILE)
+                        love.graphics.rectangle("fill", px, py, ts, ts)
+
+                        local col        = x - b.x
+                        local row        = y - b.y
+                        local tile_entry = b.storage.tiles[col * b.height + row + 1]
+                        local used       = 0
+                        for j = 1, #tile_entry.contents do
+                            local e = registry[tile_entry.contents[j]]
+                            local amt = e.amount ~= nil and e.amount or 1
+                            used = used + ResourceConfig[e.type].weight * amt
+                        end
+
+                        if used > 0 then
+                            local pad = used >= b.storage.tile_capacity
+                                and math.floor(ts * 0.09)
+                                or  math.floor(ts * 0.34)
+                            love.graphics.setColor(COLOR_STOCKPILE_FILL)
+                            love.graphics.rectangle("fill", px + pad, py + pad, ts - pad * 2, ts - pad * 2)
+                        end
                     end
                 end
             end
@@ -123,7 +145,19 @@ function renderer.drawBuildings()
     end
 end
 
-local COLOR_DESIG_CHOP = { 0.95, 0.65, 0.10, 0.55 }
+local COLOR_GROUND_PILE = { 0.72, 0.58, 0.28 }
+local COLOR_DESIG_CHOP  = { 0.95, 0.65, 0.10, 0.55 }
+
+function renderer.drawGroundPiles()
+    local ts  = TILE_SIZE
+    local pad = math.floor(ts * 0.25)
+    local sz  = ts - pad * 2
+    for i = 1, #world.ground_piles do
+        local gp = world.ground_piles[i]
+        love.graphics.setColor(COLOR_GROUND_PILE)
+        love.graphics.rectangle("fill", (gp.x - 1) * ts + pad, (gp.y - 1) * ts + pad, sz, sz)
+    end
+end
 
 function renderer.drawDesignations()
     local sw, sh = love.graphics.getDimensions()

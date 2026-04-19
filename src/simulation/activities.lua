@@ -26,10 +26,10 @@ function activities.postActivity(fields)
         y              = fields.y or 0,
         workplace_id   = fields.workplace_id,
         progress       = 0,
-        resource_type  = fields.resource_type,
-        source_id      = fields.source_id,
-        destination_id = fields.destination_id,
-        is_private     = fields.is_private or false,
+        resource_type    = fields.resource_type,
+        source_id        = fields.source_id,
+        destination_id   = fields.destination_id,
+        reserved_amount  = fields.reserved_amount,
     })
     if fields.workplace_id ~= nil then
         local building = registry[fields.workplace_id]
@@ -114,7 +114,13 @@ end
 
 local function canClaim(unit, activity)
     if activity.worker_id ~= nil then return false end
-    if activity.is_private == true then return false end
+    if activity.type == "haul" then
+        if activity.source_id ~= nil
+                and resources.findNearestStorage(unit, activity.resource_type, 1) == nil then
+            return false
+        end
+        return unit.class == "serf"
+    end
     local type_cfg = ActivityTypeConfig[activity.type]
     if type_cfg == nil then return false end
     if unit.class == "serf" then
@@ -166,6 +172,25 @@ function activities.cancelDesignation(tile_idx)
         tile.claimed_by = nil
         activities.removeActivity(act_id)
     end
+end
+
+-- ─── Ground pile haul ────────────────────────────────────────────────────────
+
+-- Posts a public haul activity for a ground pile + resource type if one doesn't exist.
+function activities.postGroundPileHaulIfNeeded(gp, rtype)
+    for i = 1, #world.activities do
+        local a = world.activities[i]
+        if a.type == "haul" and a.source_id == gp.id and a.resource_type == rtype then
+            return
+        end
+    end
+    activities.postActivity({
+        type          = "haul",
+        x             = gp.x,
+        y             = gp.y,
+        source_id     = gp.id,
+        resource_type = rtype,
+    })
 end
 
 -- ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -240,11 +265,7 @@ ActivityHandlers["woodcutter"] = {
             else
                 tile.claimed_by   = nil
                 unit.claimed_tile = nil
-                if tile.designation_activity_id == activity.id then
-                    tile.designation             = nil
-                    tile.designation_activity_id = nil
-                end
-                activities.removeActivity(activity.id)
+                activities.releaseActivity(unit)
                 unit.current_action = { type = "idle" }
             end
 
@@ -301,18 +322,31 @@ ActivityHandlers["woodcutter"] = {
             end
 
             -- Self-deposit: keep activity alive to drive the deposit travel
-            local storage = resources.findNearestStorage(unit, "wood")
+            local carry_amount = registry[unit.carrying[1]].amount
+            local storage = resources.findNearestStorage(unit, "wood", 1)
             if storage ~= nil then
-                activity.phase      = "travel_deposit"
-                activity.storage_id = storage.id
+                local reserve_amount = math.min(carry_amount, resources.getAvailableCapacity(storage.storage, "wood"))
+                resources.reserve(storage.storage, "wood", reserve_amount, "in")
+                activity.phase           = "travel_deposit"
+                activity.storage_id      = storage.id
+                activity.reserved_amount = reserve_amount
                 if getUnits().startMoveAdjacentToRect(
                     unit, storage.x, storage.y, storage.width, storage.height) then
                     unit.current_action = { type = "travel" }
                 else
+                    resources.releaseReservation(storage.storage, "wood", reserve_amount, "in")
                     activities.removeActivity(activity.id)
                     unit.current_action = { type = "idle" }
                 end
             else
+                -- No storage: ground drop
+                if #unit.carrying > 0 then
+                    local rtype = registry[unit.carrying[1]].type
+                    local gp = resources.groundDrop(unit)
+                    if gp ~= nil then
+                        activities.postGroundPileHaulIfNeeded(gp, rtype)
+                    end
+                end
                 activities.removeActivity(activity.id)
                 unit.current_action = { type = "idle" }
             end
@@ -320,18 +354,188 @@ ActivityHandlers["woodcutter"] = {
         elseif phase == "travel_deposit" then
             -- Arrived at stockpile: deposit all wood
             local storage = registry[activity.storage_id]
-            if storage ~= nil and #unit.carrying > 0 then
+            if storage == nil then
+                -- Stockpile gone: ground drop
+                if #unit.carrying > 0 then
+                    local rtype = registry[unit.carrying[1]].type
+                    local gp = resources.groundDrop(unit)
+                    if gp ~= nil then
+                        activities.postGroundPileHaulIfNeeded(gp, rtype)
+                    end
+                end
+            elseif #unit.carrying > 0 then
                 local stack = registry[unit.carrying[1]]
                 if stack ~= nil then
-                    local ids = resources.withdrawFromCarrying(unit, stack.type, stack.amount)
+                    local ids = resources.withdrawFromCarrying(unit, stack.type, activity.reserved_amount)
                     for i = 1, #ids do
                         resources.deposit(storage.storage, ids[i])
                     end
-                    log:info("ACTIVITY", "Unit %d (%s) deposited wood at building %d",
-                        unit.id, unit.name, storage.id)
+                    log:info("ACTIVITY", "Unit %d (%s) deposited %d wood at building %d",
+                        unit.id, unit.name, activity.reserved_amount, storage.id)
                 end
             end
             activities.removeActivity(activity.id)
+            unit.current_action = { type = "idle" }
+        end
+    end
+}
+
+-- Haul handler: drives both public (ground pile pickup) and private (offload deposit) haul activities.
+-- Public:  source_id = ground_pile id, destination_id = nil (resolved in nil phase)
+-- Private: source_id = nil (unit already carrying), destination_id = storage id
+--
+-- Reservations made in nil phase:
+--   Public:  reserve_out at pile (pick_amount items), reserve_in at dest (pick_weight)
+--   Private: reserve_in at dest already made by onActionComplete before handler is called
+ActivityHandlers["haul"] = {
+    nextAction = function(unit, activity)
+        local phase = activity.phase
+
+        if phase == nil then
+            if activity.source_id == nil then
+                -- Private offload: unit is already carrying; path to destination.
+                local dest = registry[activity.destination_id]
+                if dest == nil then
+                    local gp = resources.groundDrop(unit)
+                    if gp ~= nil then
+                        activities.postGroundPileHaulIfNeeded(gp, activity.resource_type)
+                    end
+                    activities.removeActivity(activity.id)
+                    unit.current_action = { type = "idle" }
+                    return
+                end
+                if getUnits().startMoveAdjacentToRect(unit, dest.x, dest.y, dest.width, dest.height) then
+                    activity.phase      = "travel_deposit"
+                    unit.current_action = { type = "travel" }
+                else
+                    resources.releaseReservation(dest.storage, activity.resource_type, activity.reserved_amount, "in")
+                    local gp = resources.groundDrop(unit)
+                    if gp ~= nil then
+                        activities.postGroundPileHaulIfNeeded(gp, activity.resource_type)
+                    end
+                    activities.removeActivity(activity.id)
+                    unit.current_action = { type = "idle" }
+                end
+
+            else
+                -- Public pickup: resolve destination, reserve, travel to pile.
+                local gp = registry[activity.source_id]
+                if gp == nil then
+                    activities.removeActivity(activity.id)
+                    unit.current_action = { type = "idle" }
+                    return
+                end
+                local avail = resources.getAvailableStock(gp, activity.resource_type)
+                local pick  = math.min(avail, unit:carryableAmount(activity.resource_type))
+                if pick <= 0 then
+                    activities.releaseActivity(unit)
+                    unit.current_action = { type = "idle" }
+                    return
+                end
+                local dest = resources.findNearestStorage(unit, activity.resource_type, pick)
+                if dest == nil then
+                    activities.releaseActivity(unit)
+                    unit.current_action = { type = "idle" }
+                    return
+                end
+                resources.reserve(gp, activity.resource_type, pick, "out")
+                resources.reserve(dest.storage, activity.resource_type, pick, "in")
+                activity.destination_id  = dest.id
+                activity.reserved_amount = pick
+                if getUnits().startMoveAdjacentToRect(unit, gp.x, gp.y, 1, 1) then
+                    activity.phase      = "travel_pickup"
+                    unit.current_action = { type = "travel" }
+                else
+                    resources.releaseReservation(gp, activity.resource_type, pick, "out")
+                    resources.releaseReservation(dest.storage, activity.resource_type, pick, "in")
+                    activities.releaseActivity(unit)
+                    unit.current_action = { type = "idle" }
+                end
+            end
+
+        elseif phase == "travel_pickup" then
+            local gp   = registry[activity.source_id]
+            local dest = registry[activity.destination_id]
+            local rtype = activity.resource_type
+
+            if gp == nil then
+                if dest ~= nil then
+                    resources.releaseReservation(dest.storage, rtype, activity.reserved_amount, "in")
+                end
+                activities.removeActivity(activity.id)
+                unit.current_action = { type = "idle" }
+                return
+            end
+
+            local actual_stock = resources.getStock(gp, rtype)
+            local actual_pick  = math.min(activity.reserved_amount, actual_stock,
+                                          unit:carryableAmount(rtype))
+            if actual_pick > 0 then
+                local ids = resources.withdraw(gp, rtype, actual_pick)
+                for i = 1, #ids do
+                    resources.carryEntity(unit, ids[i])
+                end
+            end
+
+            if actual_pick < activity.reserved_amount then
+                resources.releaseReservation(gp, rtype, activity.reserved_amount - actual_pick, "out")
+                if dest ~= nil then
+                    resources.releaseReservation(dest.storage, rtype, activity.reserved_amount - actual_pick, "in")
+                end
+            end
+            activity.reserved_amount = actual_pick
+
+            if actual_pick > 0 and dest ~= nil
+                    and getUnits().startMoveAdjacentToRect(unit, dest.x, dest.y, dest.width, dest.height) then
+                activity.phase      = "travel_deposit"
+                unit.current_action = { type = "travel" }
+                return
+            end
+
+            -- Can't reach destination or nothing picked up.
+            if dest ~= nil and actual_pick > 0 then
+                resources.releaseReservation(dest.storage, rtype, actual_pick, "in")
+            end
+            if actual_pick > 0 then
+                local gp2 = resources.groundDrop(unit)
+                if gp2 ~= nil then
+                    activities.postGroundPileHaulIfNeeded(gp2, rtype)
+                end
+            end
+            local remaining = resources.getStock(gp, rtype)
+            activities.removeActivity(activity.id)
+            if remaining > 0 then activities.postGroundPileHaulIfNeeded(gp, rtype) end
+            if #gp.contents == 0 then resources.destroyGroundPile(gp) end
+            unit.current_action = { type = "idle" }
+
+        elseif phase == "travel_deposit" then
+            local dest  = registry[activity.destination_id]
+            local rtype = activity.resource_type
+
+            if dest ~= nil and #unit.carrying > 0 then
+                local stack = registry[unit.carrying[1]]
+                local ids   = resources.withdrawFromCarrying(unit, stack.type, activity.reserved_amount)
+                for i = 1, #ids do
+                    resources.deposit(dest.storage, ids[i])
+                end
+                log:info("HAUL", "Unit %d (%s) deposited %d %s at building %d",
+                    unit.id, unit.name, activity.reserved_amount, rtype, dest.id)
+            elseif dest == nil and #unit.carrying > 0 then
+                local gp2 = resources.groundDrop(unit)
+                if gp2 ~= nil then
+                    activities.postGroundPileHaulIfNeeded(gp2, rtype)
+                end
+            end
+
+            -- For public haul: re-post if pile still has this type, destroy if empty.
+            local gp = activity.source_id ~= nil and registry[activity.source_id] or nil
+            activities.removeActivity(activity.id)
+            if gp ~= nil then
+                if resources.getStock(gp, rtype) > 0 then
+                    activities.postGroundPileHaulIfNeeded(gp, rtype)
+                end
+                if #gp.contents == 0 then resources.destroyGroundPile(gp) end
+            end
             unit.current_action = { type = "idle" }
         end
     end

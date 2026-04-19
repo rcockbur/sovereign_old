@@ -41,10 +41,8 @@ function buildings.placeStockpile(x1, y1, x2, y2)
     local by = math.max(y1, y2)
 
     local storage_tiles = {}
-    for x = lx, rx do
-        for y = ty, by do
-            storage_tiles[tileIndex(x, y)] = { contents = {}, reserved_in = 0, reserved_out = 0 }
-        end
+    for _ = 1, (rx - lx + 1) * (by - ty + 1) do
+        storage_tiles[#storage_tiles + 1] = { contents = {}, reserved_in = {}, reserved_out = {} }
     end
 
     local filters = {}
@@ -67,6 +65,8 @@ function buildings.placeStockpile(x1, y1, x2, y2)
             tile_capacity  = STOCKPILE_TILE_CAPACITY,
             filters        = filters,
             tiles          = storage_tiles,
+            reserved_in    = {},
+            reserved_out   = {},
         },
     })
 
@@ -79,6 +79,18 @@ function buildings.placeStockpile(x1, y1, x2, y2)
     log:info("WORLD", "Placed stockpile %d at (%d,%d) size %dx%d",
         building.id, lx, ty, rx - lx + 1, by - ty + 1)
     return building
+end
+
+function buildings.tileWorldXY(building, i)
+    local col = math.floor((i - 1) / building.height)
+    local row = (i - 1) % building.height
+    return building.x + col, building.y + row
+end
+
+function buildings.tileLocalIndex(building, wx, wy)
+    local col = wx - building.x
+    local row = wy - building.y
+    return col * building.height + row + 1
 end
 
 return buildings
