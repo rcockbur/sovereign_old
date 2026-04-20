@@ -384,6 +384,136 @@ ActivityHandlers["woodcutter"] = {
     end
 }
 
+ActivityHandlers["gatherer"] = {
+    nextAction = function(unit, activity)
+        local phase = activity.phase
+
+        if phase == nil then
+            -- Claim the resource tile and path adjacent to it
+            local tile_idx = tileIndex(activity.x, activity.y)
+            local tile     = world.tiles[tile_idx]
+            tile.claimed_by   = unit.id
+            unit.claimed_tile = tile_idx
+            if getUnits().startMoveAdjacentToRect(unit, activity.x, activity.y, 1, 1) then
+                activity.phase      = "travel_bush"
+                unit.current_action = { type = "travel" }
+            else
+                tile.claimed_by   = nil
+                unit.claimed_tile = nil
+                activities.releaseActivity(unit)
+                unit.current_action = { type = "idle" }
+            end
+
+        elseif phase == "travel_bush" then
+            -- Arrived adjacent to bush: validate plant still mature
+            local tile = world.tiles[tileIndex(activity.x, activity.y)]
+            if tile.plant_type ~= "berry_bush" or tile.plant_growth < 3 then
+                if unit.claimed_tile ~= nil then
+                    world.tiles[unit.claimed_tile].claimed_by = nil
+                    unit.claimed_tile = nil
+                end
+                if tile.designation_activity_id == activity.id then
+                    tile.designation             = nil
+                    tile.designation_activity_id = nil
+                end
+                activities.removeActivity(activity.id)
+                unit.current_action = { type = "idle" }
+                return
+            end
+            activity.phase = "work"
+            unit.current_action = {
+                type       = "work",
+                progress   = 0,
+                work_ticks = PlantConfig["berry_bush"].harvest_ticks,
+            }
+
+        elseif phase == "work" then
+            -- Harvest complete: reset bush to seedling, grant berries
+            local tile_idx  = tileIndex(activity.x, activity.y)
+            local tile      = world.tiles[tile_idx]
+            local plant_cfg = PlantConfig["berry_bush"]
+
+            tile.plant_growth = 1
+            tile.claimed_by   = nil
+            unit.claimed_tile = nil
+            tile.designation             = nil
+            tile.designation_activity_id = nil
+
+            resources.carryResource(unit, "berries", plant_cfg.harvest_yield)
+            log:info("ACTIVITY", "Unit %d (%s) gathered berries at (%d,%d), carrying %d berries",
+                unit.id, unit.name, activity.x, activity.y,
+                resources.countWeight(unit.carrying) / ResourceConfig["berries"].weight)
+
+            -- Chain: can carry another yield AND an unclaimed designation exists?
+            if unit:carryableAmount("berries") >= plant_cfg.harvest_yield then
+                local next_act = findNearestDesignation(unit, "gatherer")
+                if next_act ~= nil then
+                    activities.removeActivity(activity.id)
+                    activities.claimActivity(unit, next_act)
+                    activities.handlers["gatherer"].nextAction(unit, next_act)
+                    return
+                end
+            end
+
+            -- Self-deposit: keep activity alive to drive the deposit travel
+            local carry_amount = registry[unit.carrying[1]].amount
+            local storage = resources.findNearestStorage(unit, "berries", 1)
+            if storage ~= nil then
+                local reserve_amount = math.min(carry_amount, resources.getAvailableCapacity(storage.storage, "berries"))
+                resources.reserve(storage.storage, "berries", reserve_amount, "in")
+                activity.phase           = "travel_deposit"
+                activity.storage_id      = storage.id
+                activity.reserved_amount = reserve_amount
+                if getUnits().startMoveAdjacentToRect(
+                    unit, storage.x, storage.y, storage.width, storage.height) then
+                    unit.current_action = { type = "travel" }
+                else
+                    resources.releaseReservation(storage.storage, "berries", reserve_amount, "in")
+                    activities.removeActivity(activity.id)
+                    unit.current_action = { type = "idle" }
+                end
+            else
+                -- No storage: ground drop
+                if #unit.carrying > 0 then
+                    local rtype = registry[unit.carrying[1]].type
+                    local gp = resources.groundDrop(unit)
+                    if gp ~= nil then
+                        activities.postGroundPileHaulIfNeeded(gp, rtype)
+                    end
+                end
+                activities.removeActivity(activity.id)
+                unit.current_action = { type = "idle" }
+            end
+
+        elseif phase == "travel_deposit" then
+            -- Arrived at stockpile: deposit all berries
+            local storage = registry[activity.storage_id]
+            if storage == nil then
+                -- Stockpile gone: ground drop
+                if #unit.carrying > 0 then
+                    local rtype = registry[unit.carrying[1]].type
+                    local gp = resources.groundDrop(unit)
+                    if gp ~= nil then
+                        activities.postGroundPileHaulIfNeeded(gp, rtype)
+                    end
+                end
+            elseif #unit.carrying > 0 then
+                local stack = registry[unit.carrying[1]]
+                if stack ~= nil then
+                    local ids = resources.withdrawFromCarrying(unit, stack.type, activity.reserved_amount)
+                    for i = 1, #ids do
+                        resources.deposit(storage.storage, ids[i])
+                    end
+                    log:info("ACTIVITY", "Unit %d (%s) deposited %d berries at building %d",
+                        unit.id, unit.name, activity.reserved_amount, storage.id)
+                end
+            end
+            activities.removeActivity(activity.id)
+            unit.current_action = { type = "idle" }
+        end
+    end
+}
+
 -- Haul handler: drives both public (ground pile pickup) and private (offload deposit) haul activities.
 -- Public:  source_id = ground_pile id, destination_id = nil (resolved in nil phase)
 -- Private: source_id = nil (unit already carrying), destination_id = storage id

@@ -29,14 +29,42 @@ local function unitScreenPos(unit, ts, half)
     return px, py
 end
 
-local COLOR_GRASS          = { 0.35, 0.55, 0.25 }
-local COLOR_WATER          = { 0.20, 0.40, 0.75 }
-local COLOR_ROCK           = { 0.50, 0.50, 0.50 }
-local COLOR_TREE           = { 0.15, 0.35, 0.10 }
-local COLOR_BERRY          = { 0.55, 0.25, 0.65 }
-local COLOR_UNIT           = { 0.90, 0.75, 0.20 }
-local COLOR_STOCKPILE      = { 0.65, 0.55, 0.35 }
-local COLOR_STOCKPILE_FILL = { 0.35, 0.22, 0.08 }
+local COLOR_GRASS     = { 0.35, 0.55, 0.25 }
+local COLOR_WATER     = { 0.20, 0.40, 0.75 }
+local COLOR_ROCK      = { 0.50, 0.50, 0.50 }
+local COLOR_TREE      = { 0.15, 0.35, 0.10 }
+local COLOR_BERRY     = { 0.55, 0.25, 0.65 }
+local COLOR_UNIT      = { 0.90, 0.75, 0.20 }
+local COLOR_STOCKPILE = { 0.65, 0.55, 0.35 }
+
+-- Plant radii by growth stage (fraction of half-tile)
+local TREE_RADIUS   = { 0.25, 0.50, 0.75 }
+local BUSH_RADIUS   = { 0.25, 0.50, 0.75 }
+
+local RESOURCE_COLOR = {
+    -- Raw construction
+    wood            = { 0.58, 0.38, 0.18 },
+    firewood        = { 0.38, 0.22, 0.10 },
+    stone           = { 0.58, 0.58, 0.60 },
+    iron            = { 0.42, 0.28, 0.22 },
+    steel           = { 0.62, 0.65, 0.72 },
+    -- Crops
+    wheat           = { 0.85, 0.72, 0.22 },
+    barley          = { 0.75, 0.65, 0.28 },
+    flax            = { 0.60, 0.78, 0.68 },
+    -- Processed goods
+    flour           = { 0.92, 0.90, 0.78 },
+    bread           = { 0.80, 0.55, 0.22 },
+    beer            = { 0.82, 0.55, 0.12 },
+    plain_clothing  = { 0.82, 0.78, 0.68 },
+    -- Food (harvested)
+    berries         = { 0.55, 0.25, 0.65 },
+    fish            = { 0.52, 0.68, 0.82 },
+    herbs           = { 0.28, 0.62, 0.28 },
+    -- Tools
+    iron_tools      = { 0.38, 0.35, 0.32 },
+    steel_tools     = { 0.62, 0.65, 0.70 },
+}
 
 function renderer.drawWorld()
     local sw, sh = love.graphics.getDimensions()
@@ -69,12 +97,12 @@ function renderer.drawWorld()
             end
             love.graphics.rectangle("fill", px, py, ts, ts)
 
-            if tile.plant_type == "tree" then
+            if tile.plant_type == "tree" and tile.plant_growth >= 1 then
                 love.graphics.setColor(COLOR_TREE)
-                love.graphics.circle("fill", px + half, py + half, half * 0.75)
-            elseif tile.plant_type == "berry_bush" then
+                love.graphics.circle("fill", px + half, py + half, half * TREE_RADIUS[tile.plant_growth])
+            elseif tile.plant_type == "berry_bush" and tile.plant_growth >= 1 then
                 love.graphics.setColor(COLOR_BERRY)
-                love.graphics.circle("fill", px + half, py + half, half * 0.35)
+                love.graphics.circle("fill", px + half, py + half, half * BUSH_RADIUS[tile.plant_growth])
             end
         end
     end
@@ -127,17 +155,19 @@ function renderer.drawBuildings()
                         local row        = y - building.y
                         local tile_entry = building.storage.tiles[col * building.height + row + 1]
                         local used       = 0
+                        local rtype      = nil
                         for j = 1, #tile_entry.contents do
                             local entity = registry[tile_entry.contents[j]]
                             local amt    = entity.amount ~= nil and entity.amount or 1
-                            used = used + ResourceConfig[entity.type].weight * amt
+                            used  = used + ResourceConfig[entity.type].weight * amt
+                            rtype = entity.type
                         end
 
                         if used > 0 then
                             local pad = used >= building.storage.tile_capacity
                                 and math.floor(ts * 0.09)
                                 or  math.floor(ts * 0.34)
-                            love.graphics.setColor(COLOR_STOCKPILE_FILL)
+                            love.graphics.setColor(RESOURCE_COLOR[rtype])
                             love.graphics.rectangle("fill", px + pad, py + pad, ts - pad * 2, ts - pad * 2)
                         end
                     end
@@ -147,8 +177,9 @@ function renderer.drawBuildings()
     end
 end
 
-local COLOR_GROUND_PILE = { 0.72, 0.58, 0.28 }
-local COLOR_DESIG_CHOP  = { 0.95, 0.65, 0.10, 0.55 }
+local COLOR_GROUND_PILE  = { 0.72, 0.58, 0.28 }
+local COLOR_DESIG_CHOP   = { 0.95, 0.65, 0.10, 0.55 }
+local COLOR_DESIG_GATHER = { 0.55, 0.25, 0.65, 0.55 }
 
 function renderer.drawGroundPiles()
     local ts  = TILE_SIZE
@@ -183,6 +214,10 @@ function renderer.drawDesignations()
             local tile = world.tiles[tileIndex(x, y)]
             if tile.designation == "chop" then
                 love.graphics.setColor(COLOR_DESIG_CHOP)
+                love.graphics.rectangle("fill",
+                    (x - 1) * ts + pad, (y - 1) * ts + pad, size, size)
+            elseif tile.designation == "gather" then
+                love.graphics.setColor(COLOR_DESIG_GATHER)
                 love.graphics.rectangle("fill",
                     (x - 1) * ts + pad, (y - 1) * ts + pad, size, size)
             end

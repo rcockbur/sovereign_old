@@ -5,7 +5,7 @@
 
 *Updated by Claude Code as systems are implemented.*
 
-Phase 1 is implemented up to and including Milestone 16
+Phase 1 is implemented up to and including Milestone 17
 
 ## Implementation Notes
 

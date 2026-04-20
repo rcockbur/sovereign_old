@@ -57,10 +57,15 @@ end
 
 -- ─── Designation helpers ──────────────────────────────────────────────────────
 
-local DESIGNATION_PLANT = { chop = "tree" }
+local DESIGNATION_PLANT    = { chop = "tree", gather = "berry_bush" }
+local DESIGNATION_ACTIVITY = {
+    chop   = { activity_type = "woodcutter", resource_type = "wood" },
+    gather = { activity_type = "gatherer",   resource_type = "berries" },
+}
 
 local function designateRect(lx, rx, ty, by, dtype)
     local plant_type = DESIGNATION_PLANT[dtype]
+    local act_cfg    = DESIGNATION_ACTIVITY[dtype]
     for x = lx, rx do
         for y = ty, by do
             if x >= 1 and x <= MAP_WIDTH and y >= 1 and y <= MAP_HEIGHT then
@@ -70,10 +75,10 @@ local function designateRect(lx, rx, ty, by, dtype)
                         and tile.designation == nil then
                     tile.designation = dtype
                     local act = activities.postActivity({
-                        type          = "woodcutter",
+                        type          = act_cfg.activity_type,
                         x             = x,
                         y             = y,
-                        resource_type = "wood",
+                        resource_type = act_cfg.resource_type,
                     })
                     tile.designation_activity_id = act.id
                 end
@@ -231,6 +236,10 @@ end
 function hub.keypressed(key)
     if key == Keybinds.designate_chop then
         hub.setMode("designating", { designation_type = "chop" })
+        return true
+    end
+    if key == Keybinds.designate_gather then
+        hub.setMode("designating", { designation_type = "gather" })
         return true
     end
     if key == Keybinds.cancel_designation then
