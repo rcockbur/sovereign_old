@@ -180,7 +180,7 @@ end
 
 local COLOR_GROUND_PILE  = { 0.72, 0.58, 0.28 }
 local COLOR_DESIG_CHOP   = { 0.95, 0.65, 0.10, 0.55 }
-local COLOR_DESIG_GATHER = { 0.55, 0.25, 0.65, 0.55 }
+local COLOR_DESIG_GATHER = { 0.95, 0.90, 0.30, 0.55 }
 
 function renderer.drawGroundPiles()
     local tile_size = TILE_SIZE
