@@ -1,11 +1,11 @@
 # FILES.md — Document System Reference
-*v6*
+*v7*
 
 ## Documents
 
 **CLAUDE.md** — Technical hub. Conventions, constants, architecture, dev tools, module ownership, serialization. Contains a routing table that maps technical topics to the domain files below. Always auto-loaded by Claude Code.
 
-**ROADMAP.md** — Project planning. Development phase scope and milestones scope, implementation state tracking and implementation notes. Claude Code reads this for milestone specs and updates implementation state and implimentation notes here.
+**ROADMAP.md** — Project planning. Development phase scope and milestones, implementation state, pending implementation tasks, and implementation decisions. Claude Code reads this for milestone specs and updates implementation state, pending implementation tasks, and implementation decisions here.
 
 **BEHAVIOR.md, ECONOMY.md, WORLD.md, TABLES.md** — Simulation files. Technical references for the game's model — everything that would exist in a headless run. See CLAUDE.md's technical routing table for what each file covers and where new content belongs.
 

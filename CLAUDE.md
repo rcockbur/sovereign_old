@@ -1,5 +1,5 @@
 # Sovereign — CLAUDE.md
-*v24 · Technical reference for Claude Code and Claude.ai design sessions.*
+*v25 · Technical reference for Claude Code and Claude.ai design sessions.*
 
 > **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
 
@@ -130,9 +130,43 @@ BuildingConfig uses `default_` prefixed fields for values that are copied to run
 
 CLAUDE CODE GUIDANCE
 
-Claude Code edits only the **Implementation State** and **Implementation Notes** sections of ROADMAP.md. All other content in all project documents is off-limits without explicit instruction. If implementation reveals a discrepancy or design gap, add a brief note to Implementation Notes. If a gap is large enough that resolving it would require design decisions beyond the spec, stop implementing and discuss with the user. Once a decision is reached, add a note describing the decision to Implementation Notes.
+Read ROADMAP.md at the start of every session. Pay particular attention to the Pending Implementation Tasks section — it is short and may contain entries that intersect with the work being requested.
 
-ROADMAP.md contains the implementation milestones and current implementation state. Read it at the start of each session to find the next milestone.
+Claude Code edits only the **Implementation State**, **Pending Implementation Tasks**, and **Implementation Decisions** sections of ROADMAP.md. All other content in all project documents is off-limits without explicit instruction.
+
+When implementation requires a placeholder, stub, or temporary solution because the proper implementation is blocked by later work, follow the TEMP MARKERS convention below.
+
+If implementation reveals a discrepancy or design gap large enough to require design decisions beyond the spec, stop implementing and discuss with the user. Once resolved, record the decision in Implementation Decisions.
+
+TEMP MARKERS
+
+When implementation requires a placeholder, stub, or temporary solution because the proper implementation is blocked by later work, mark the code with a `TEMP(keyword)` comment and add a corresponding entry to the Pending Implementation Tasks section in ROADMAP.md.
+
+Keywords are specific descriptions, not generic labels: `stockpile_color`, `bin_category_field`, `frost_placeholder` — never `temp1` or `placeholder`. There should never be more than one TEMP entry with the same keyword in the codebase at the same time.
+
+Resolving a TEMP requires three steps in the same change: remove the marker from the code, remove the entry from Pending Implementation Tasks, and do the actual work. None of the three is complete until all three are.
+
+Pending Implementation Tasks has two subsections. **Forward Dependencies** are entries that a specific later milestone must satisfy or it will fail. **Cleanup Obligations** are placeholder solutions that should be replaced when the proper implementation arrives.
+
+Example:
+
+```
+-- in code:
+-- TEMP(stockpile_color): placeholder until proper sprites land
+
+-- in ROADMAP.md Pending Implementation Tasks:
+FORWARD DEPENDENCIES
+- TEMP(bin_category_field) — Bins must be initialized with a category 
+  field matching their role. Expected: p1m19.
+
+CLEANUP OBLIGATIONS
+- TEMP(stockpile_color) — Stockpile renders as flat color in the 
+  building renderer. Expected: p3.
+```
+
+MILESTONE REFERENCES
+
+References to implementation milestones use the `pxmy` format — lowercase `p` and `m` with phase and milestone numbers (e.g. `p1m19`, `p3m05`). Use the most precise form available: `pxmy` when the specific milestone is known, `px` alone when only the phase is known, omit the reference when neither is known with confidence.
 
 FLAT INDEX CONVENTION
 
@@ -339,8 +373,6 @@ Display names and descriptions for all game entities live in `config/strings.lua
 LOG SYSTEM (`core/log.lua`)
 
 Categories: `TIME`, `UNIT`, `ACTIVITY`, `WORLD`, `HEALTH`, `HAUL`, `SAVE`, `STATE`. Severity levels: OFF, ERROR, WARN, INFO, DEBUG. Ring buffer of last 200 messages for overlay. `log:info("UNIT", "Unit %d claimed activity %d", unit.id, activity.id)`.
-
-File output writes to `logs/` in the repo root using Lua's `io.open` — not `love.filesystem`, which writes to the save directory. Each session creates a timestamped file (e.g., `logs/2026-04-11_14-30-05.log`). On startup, if more than 20 log files exist, delete the oldest until 20 remain. Flush every log call. Overlay severity defaults to INFO, file severity defaults to DEBUG. `logs/` is in `.gitignore`.
 
 DEVELOPER OVERLAY (`ui/dev_overlay.lua`)
 
