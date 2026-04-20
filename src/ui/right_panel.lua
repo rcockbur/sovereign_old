@@ -28,10 +28,12 @@ local SPEED_LIST = {
 local btn_rects = { {}, {}, {}, {}, {}, {}, {} }
 
 local function formatTime(hour, minute)
-    local period = hour < 12 and "AM" or "PM"
-    local h = hour % 12
-    if h == 0 then h = 12 end
-    return string.format("%d:%02d %s", h, minute, period)
+    local period       = hour < 12 and "AM" or "PM"
+    local display_hour = hour % 12
+    if display_hour == 0 then
+        display_hour = 12
+    end
+    return string.format("%d:%02d %s", display_hour, minute, period)
 end
 
 function right_panel.draw()
@@ -63,8 +65,8 @@ function right_panel.draw()
         love.graphics.rectangle("fill", bx, by, BTN_W, BTN_H, 2, 2)
         love.graphics.setColor(COL_TEXT)
         love.graphics.printf(tostring(i), bx, by + (BTN_H - fh) * 0.5, BTN_W, "center")
-        local b = btn_rects[i]
-        b.x = bx;  b.y = by;  b.w = BTN_W;  b.h = BTN_H;  b.speed = SPEED_LIST[i]
+        local btn = btn_rects[i]
+        btn.x = bx;  btn.y = by;  btn.w = BTN_W;  btn.h = BTN_H;  btn.speed = SPEED_LIST[i]
     end
 
     local pause_x = px + PANEL_PAD + 6 * (BTN_W + BTN_GAP) + 4
@@ -73,14 +75,16 @@ function right_panel.draw()
     love.graphics.rectangle("fill", pause_x, by, pause_w, BTN_H, 2, 2)
     love.graphics.setColor(COL_TEXT)
     love.graphics.printf(world.time.is_paused == true and ">" or "||", pause_x, by + (BTN_H - fh) * 0.5, pause_w, "center")
-    local pb = btn_rects[7]
-    pb.x = pause_x;  pb.y = by;  pb.w = pause_w;  pb.h = BTN_H;  pb.is_pause = true
+    local pause_btn = btn_rects[7]
+    pause_btn.x = pause_x;  pause_btn.y = by;  pause_btn.w = pause_w;  pause_btn.h = BTN_H;  pause_btn.is_pause = true
 end
 
 -- Returns true if the click was consumed (inside the panel area).
 function right_panel.mousepressed(x, y, button)
     local sw = love.graphics.getWidth()
-    if x < sw - PANEL_W then return false end
+    if x < sw - PANEL_W then
+        return false
+    end
 
     if button == 1 then
         for _, btn in ipairs(btn_rects) do

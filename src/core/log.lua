@@ -36,9 +36,9 @@ function log:init()
 
     local files = love.filesystem.getDirectoryItems("logs")
     local log_files = {}
-    for _, f in ipairs(files) do
-        if f:match("%.log$") then
-            log_files[#log_files + 1] = f
+    for _, filename in ipairs(files) do
+        if filename:match("%.log$") then
+            log_files[#log_files + 1] = filename
         end
     end
     table.sort(log_files)

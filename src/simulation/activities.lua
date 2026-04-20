@@ -42,7 +42,9 @@ end
 
 function activities.removeActivity(activity_id)
     local activity = registry[activity_id]
-    if activity == nil then return end
+    if activity == nil then
+        return
+    end
     -- Clear worker claim
     if activity.worker_id ~= nil then
         local worker = registry[activity.worker_id]
@@ -81,7 +83,9 @@ function activities.claimActivity(unit, activity)
 end
 
 function activities.releaseActivity(unit)
-    if unit.activity_id == nil then return end
+    if unit.activity_id == nil then
+        return
+    end
     local activity = registry[unit.activity_id]
     if activity ~= nil then
         activity.worker_id = nil
@@ -162,9 +166,9 @@ function activities.cancelDesignation(tile_idx)
     tile.designation             = nil
     tile.designation_activity_id = nil
     if act_id ~= nil then
-        local act = registry[act_id]
-        if act ~= nil and act.worker_id ~= nil then
-            local worker = registry[act.worker_id]
+        local activity = registry[act_id]
+        if activity ~= nil and activity.worker_id ~= nil then
+            local worker = registry[activity.worker_id]
             if worker ~= nil then
                 worker.claimed_tile = nil
             end
@@ -179,8 +183,8 @@ end
 -- Posts a public haul activity for a ground pile + resource type if one doesn't exist.
 function activities.postGroundPileHaulIfNeeded(gp, rtype)
     for i = 1, #world.activities do
-        local a = world.activities[i]
-        if a.type == "haul" and a.source_id == gp.id and a.resource_type == rtype then
+        local activity = world.activities[i]
+        if activity.type == "haul" and activity.source_id == gp.id and activity.resource_type == rtype then
             return
         end
     end
@@ -237,12 +241,12 @@ local function findNearestDesignation(unit, act_type)
     local best_dist = nil
     local best_act  = nil
     for i = 1, #world.activities do
-        local a = world.activities[i]
-        if a.type == act_type and a.worker_id == nil then
-            local dist = math.abs(unit.x - a.x) + math.abs(unit.y - a.y)
+        local activity = world.activities[i]
+        if activity.type == act_type and activity.worker_id == nil then
+            local dist = math.abs(unit.x - activity.x) + math.abs(unit.y - activity.y)
             if best_dist == nil or dist < best_dist then
                 best_dist = dist
-                best_act  = a
+                best_act  = activity
             end
         end
     end

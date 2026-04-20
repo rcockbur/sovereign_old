@@ -1,5 +1,5 @@
 # Sovereign — UI.md
-*v14 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
+*v15 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
 
 ## Camera
 
@@ -43,11 +43,23 @@ The renderer handles the world pass. `ui.draw()` handles the UI pass.
 
 INTERACTION MODES
 
-The action bar can put the player into a mode that changes what game-world clicks mean. The current mode lives on the hub (`ui.mode`) so all consumers read from one place.
+The action bar can put the player into a mode that changes what game-world clicks mean. The current mode lives on the hub (`ui/hub.lua`) in two parallel fields so all consumers read from one place:
 
-Modes: `normal` (default — clicks select entities), `placing` (clicks place a building, carries building type and orientation), `designating` (clicks mark tiles, carries designation type), `cancelling` (clicks remove designations).
+- `hub.mode` — a string enum naming the current mode
+- `hub.mode_state` — a table holding mode-specific data, or nil when the mode has no state
 
-The action bar sets the mode. The game world input handler reads it to decide what clicks do. The renderer reads it to draw placement ghosts or designation previews. Escape and right-click reset to `normal`.
+| Mode | `mode_state` shape |
+|---|---|
+| `"normal"` | nil — clicks select entities, no state needed |
+| `"placing"` | `{ building_type, orientation }` — clicks place a building. `building_type` keys into BuildingConfig. `orientation` is `"N"`/`"S"`/`"E"`/`"W"`, or nil for player-sized and solid buildings (see Building Placement § Rotation) |
+| `"designating"` | `{ designation_type }` — clicks mark tiles. `designation_type` is `"chop"` or `"gather"` in P1 |
+| `"cancelling"` | nil — clicks remove designations of any type, no filter |
+
+**Transitions.** Mode changes go through a single function `hub.setMode(mode, state)` that writes both fields together, so `mode` and `mode_state` are never observed in an inconsistent combination. Each transition fully replaces `mode_state` — nothing from the previous mode's state carries forward.
+
+**Ephemeral state.** Exiting a mode (Escape, right-click, or explicitly switching to another mode) clears `mode_state`. Re-entering placement by clicking a building's button starts fresh at the default orientation, not whatever the player had rotated to previously. Shift-hold during placement keeps the mode active continuously, which covers the "place several of the same thing" workflow without needing persistent state.
+
+**Consumers.** The action bar sets the mode via `setMode`. The game world input handler reads `hub.mode` to decide what clicks do, then reads `hub.mode_state` for the mode-specific details. The renderer reads both to draw placement ghosts or designation previews.
 
 ## Input
 

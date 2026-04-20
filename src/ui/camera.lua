@@ -59,7 +59,9 @@ function camera.mousereleased(sx, sy, button)
 end
 
 function camera.wheelmoved(dx, dy)
-    if dy == 0 then return end
+    if dy == 0 then
+        return
+    end
     local old_zoom = camera.zoom
     local new_zoom = math.max(ZOOM_MIN, math.min(ZOOM_MAX, camera.zoom * (1.1 ^ dy)))
     local sw, sh   = love.graphics.getDimensions()

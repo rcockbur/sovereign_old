@@ -38,6 +38,7 @@ local function initState(seed)
         storage_reserved = {},
         processing       = {},
         housing          = {},
+        construction     = {},
         carrying         = {},
         equipped         = {},
         ground           = {},
@@ -129,10 +130,10 @@ end
 -- ── Settlement name ───────────────────────────────────────────────────────────
 
 generateName = function()
-    local cfg = SettlementNameConfig
-    local p = cfg.prefix[math.random(#cfg.prefix)]
-    local s = cfg.suffix[math.random(#cfg.suffix)]
-    return p .. s
+    local cfg    = SettlementNameConfig
+    local prefix = cfg.prefix[math.random(#cfg.prefix)]
+    local suffix = cfg.suffix[math.random(#cfg.suffix)]
+    return prefix .. suffix
 end
 
 -- ── Map generation ────────────────────────────────────────────────────────────
@@ -160,8 +161,8 @@ layerRock = function(ox, oy, stage)
 
     for x = 1, MAP_WIDTH do
         for y = 1, MAP_HEIGHT do
-            local t = world.tiles[tileIndex(x, y)]
-            if t.terrain == "grass" then
+            local tile = world.tiles[tileIndex(x, y)]
+            if tile.terrain == "grass" then
                 local threshold
                 if x <= band_start then
                     threshold = ts
@@ -173,7 +174,7 @@ layerRock = function(ox, oy, stage)
                 end
                 local n = love.math.noise((x + ox) * GEN_ROCK_FREQ, (y + oy) * GEN_ROCK_FREQ)
                 if n > threshold then
-                    t.terrain = "rock"
+                    tile.terrain = "rock"
                 end
             end
         end
@@ -224,8 +225,8 @@ layerTrees = function(ox, oy, stage)
 
     for x = 1, MAP_WIDTH do
         for y = 1, MAP_HEIGHT do
-            local t = world.tiles[tileIndex(x, y)]
-            if t.terrain == "grass" then
+            local tile = world.tiles[tileIndex(x, y)]
+            if tile.terrain == "grass" then
                 local threshold
                 if x <= band_start then
                     threshold = ts
@@ -237,8 +238,8 @@ layerTrees = function(ox, oy, stage)
                 end
                 local n = love.math.noise((x + ox) * GEN_TREE_FREQ, (y + oy) * GEN_TREE_FREQ)
                 if n > threshold then
-                    t.plant_type   = "tree"
-                    t.plant_growth = 3
+                    tile.plant_type   = "tree"
+                    tile.plant_growth = 3
                 end
             end
         end
@@ -252,14 +253,14 @@ layerBerries = function(stage)
     coroutine.yield(stage.start)
     for x = 1, MAP_WIDTH do
         for y = 1, MAP_HEIGHT do
-            local t = world.tiles[tileIndex(x, y)]
-            if t.terrain == "grass" and t.plant_type == nil then
+            local tile = world.tiles[tileIndex(x, y)]
+            if tile.terrain == "grass" and tile.plant_type == nil then
                 local chance = x <= SETTLEMENT_COLUMNS
                     and GEN_BERRY_CHANCE_SETTLE
                     or  GEN_BERRY_CHANCE_FOREST
                 if math.random() < chance then
-                    t.plant_type   = "berry_bush"
-                    t.plant_growth = 3
+                    tile.plant_type   = "berry_bush"
+                    tile.plant_growth = 3
                 end
             end
         end
@@ -283,10 +284,10 @@ layerStartingArea = function(stage)
     for x = GEN_START_X - half + 1, GEN_START_X + half do
         for y = GEN_START_Y - half + 1, GEN_START_Y + half do
             if x >= 1 and x <= MAP_WIDTH and y >= 1 and y <= MAP_HEIGHT then
-                local t       = world.tiles[tileIndex(x, y)]
-                t.terrain     = "grass"
-                t.plant_type  = nil
-                t.plant_growth = 0
+                local tile       = world.tiles[tileIndex(x, y)]
+                tile.terrain     = "grass"
+                tile.plant_type  = nil
+                tile.plant_growth = 0
             end
         end
     end
@@ -299,15 +300,15 @@ logGenStats = function()
     local forest  = { grass=0, water=0, rock=0, tree=0, berry=0 }
     for x = 1, MAP_WIDTH do
         for y = 1, MAP_HEIGHT do
-            local t    = world.tiles[tileIndex(x, y)]
+            local tile = world.tiles[tileIndex(x, y)]
             local half = x <= SETTLEMENT_COLUMNS and settle or forest
-            if t.terrain == "water" then
+            if tile.terrain == "water" then
                 half.water = half.water + 1
-            elseif t.terrain == "rock" then
+            elseif tile.terrain == "rock" then
                 half.rock = half.rock + 1
-            elseif t.plant_type == "tree" then
+            elseif tile.plant_type == "tree" then
                 half.tree = half.tree + 1
-            elseif t.plant_type == "berry_bush" then
+            elseif tile.plant_type == "berry_bush" then
                 half.berry = half.berry + 1
             else
                 half.grass = half.grass + 1

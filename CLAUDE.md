@@ -1,5 +1,5 @@
 # Sovereign — CLAUDE.md
-*v23 · Technical reference for Claude Code and Claude.ai design sessions.*
+*v24 · Technical reference for Claude Code and Claude.ai design sessions.*
 
 > **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
 
@@ -99,6 +99,11 @@ NAMING
 - Resource names are plural (wood, herbs, berries). Plant and map spawn item names are singular (tree, herb_bush, berry_bush).
 - Leave meaningful parameter names on stubs even if they produce unused-variable warnings. Do not suppress with `_` or `_name` — that erases intent.
 - Two position representations: bare `x`, `y` fields for an entity's own world position; `_tile` suffix for flat index tile references (from `tileIndex(x, y)`). No `{x, y}` table fields.
+- Prefer full descriptive names over abbreviations — `entity` not `e`, `building` not `b`, `activity` not `act`. Short names are only acceptable for well-understood loop indices (`i`, `j`).
+
+FORMATTING
+
+- Always use full indented block style. No single-line `if/then/end`, `for/do/end`, or function bodies — put the body on a new indented line.
 
 ERROR HANDLING
 
@@ -125,7 +130,7 @@ BuildingConfig uses `default_` prefixed fields for values that are copied to run
 
 CLAUDE CODE GUIDANCE
 
-Claude Code edits only the **Pending Review** section of CLAUDE.md and the **Implementation State** section of ROADMAP.md. All other content in all project documents is off-limits without explicit instruction. If implementation reveals a discrepancy or design gap, add a brief note to Pending Review. If a gap is large enough that resolving it would require design decisions beyond the spec, stop the session and add the question to Pending Review rather than guessing.
+Claude Code edits only the **Implementation State** and **Implementation Notes** sections of ROADMAP.md. All other content in all project documents is off-limits without explicit instruction. If implementation reveals a discrepancy or design gap, add a brief note to Implementation Notes. If a gap is large enough that resolving it would require design decisions beyond the spec, stop implementing and discuss with the user. Once a decision is reached, add a note describing the decision to Implementation Notes.
 
 ROADMAP.md contains the implementation milestones and current implementation state. Read it at the start of each session to find the next milestone.
 
@@ -374,7 +379,7 @@ Errors use `error()` or `assert` with descriptive messages. No graceful fallback
 
 LOGIC TESTS (OFFLINE)
 
-Live in `tests/`. Run outside Love2D with `lua tests/run.lua` from the repo root. Test pure logic where incorrect math or edge cases are hard to catch visually:
+Live in `tests/`. Run outside Love2D with `luajit tests/run.lua` from the repo root. Test pure logic where incorrect math or edge cases are hard to catch visually:
 
 - Need drain rates and interrupt thresholds
 - Carrying weight / speed penalty formula
@@ -458,14 +463,3 @@ UNIT NAME GENERATION
 
 Random first name from `NameConfig.male` or `NameConfig.female` based on `unit.gender`. Starting units and immigrants receive a random surname from `NameConfig.surname`. Children inherit their father's surname. No duplicate check — repeated names are allowed. UI code composes the full name (`name .. " " .. surname`) for display.
 
-## Pending Review
-
-**M13 — Resources API gaps (action required at M19):**
-
-- **`bin` container needs `category` field** — `containerCategory` dispatches on `container.category` to determine the resource_counts category ("housing", "processing", etc.). The bin spec in ECONOMY.md doesn't include this field. When housing bins are created (M19) and processing input bins (M20+), each bin must be initialized with a `category` field matching its role.
-
-**M16 — Reservation model and partial-fill deviations from spec (update ECONOMY.md and BEHAVIOR.md):**
-
-- **Reservations are amount-based throughout; weight conversion is inside capacity calculations** — `reserved_in` and `reserved_out` are stored in item amounts on all container types (not weight units as ECONOMY.md specifies for `reserved_in`). `getAvailableCapacity` returns an item count and converts internally via `math.floor(physical_weight / item_weight) - reserved_in[type]`. `reserve`, `releaseReservation`, `deposit`, and `withdraw` all use item amounts. Update ECONOMY.md to reflect this model. Bins (M19) and item inventories (M20+) must follow the same convention.
-
-- **Partial-fill self-deposit** — The offload path in `onActionComplete` reserves only `math.min(stack.amount, getAvailableCapacity(...))` — if storage has less capacity than the unit is carrying, only that portion is delivered. After the partial haul completes, the unit's remaining carry re-triggers `onActionComplete`, which either deposits to another storage or ground-drops if none has capacity. BEHAVIOR.md does not describe this partial-fill-then-retry chain. Confirm intent and update BEHAVIOR.md when writing the eating / self-fetch behavior (M23), which uses the same offload path.

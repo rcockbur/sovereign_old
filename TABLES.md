@@ -1,5 +1,5 @@
 # Sovereign — TABLES.md
-*v19 · Reference data: game entity data structures, config tables, and production chains.*
+*v20 · Reference data: game entity data structures, config tables, and production chains.*
 
 ## Data Structures
 
@@ -330,9 +330,10 @@ world = {
         storage_reserved = {},
         processing = {},
         housing = {},
+        construction = {},
+        ground = {},
         carrying = {},
         equipped = {},
-        ground = {},
     },
 
     -- Game state (formerly standalone modules)

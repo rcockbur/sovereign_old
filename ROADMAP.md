@@ -5,57 +5,13 @@
 
 *Updated by Claude Code as systems are implemented.*
 
-**M01**
-- Implemented without issue.
+Phase 1 is implemented up to and including Milestone 16
+
+## Implementation Notes
 
 **M02**
-- Switched log output from `io.open` to `love.filesystem` — `io.popen` on Windows caused a 5-second startup hang. Logs write to `Roaming/LOVE/sovereign/logs/`. 20-file rotation restored.
+- Switched log output from `io.open` to `love.filesystem` — `io.popen` on Windows caused a 5-second startup hang. Logs write to `Roaming/LOVE/sovereign/logs/`.
 - `t.identity = "sovereign"` added to `conf.lua` to name the save directory correctly.
-
-**M03**
-- Time state lives on `time.state` (a module-level table) rather than `world.time` — world.lua doesn't exist yet. Migrates to `world.time` in M04.
-- All 6 speed keybinds implemented (spec said 1–5); speed_6 keybind already existed in config so it was included.
-
-**M04**
-- `tileIndex`/`tileXY` placed in `config/constants.lua` as global functions — needed everywhere without requiring world.
-- TPS tracking fields (`ticks_this_second`, `ticks_last_second`) moved to the `time` module table rather than `world.time` — transient, not serialized, accessible to dev overlay.
-- Initial generation constants were off by ~10× (simplex noise has approximately uniform distribution; thresholds were not set accordingly). Corrected before M05: water threshold 0.35→0.03, rock thresholds 0.72/0.65→0.975/0.93, tree thresholds 0.72/0.45→0.92/0.20.
-
-**M05**
-- Implemented without issue.
-
-**M06**
-- Implemented without issue.
-
-**M07**
-- Implemented without issue.
-
-**M08**
-- Implemented without issue.
-
-**M09**
-- Implemented without issue.
-
-**M10**
-- Implemented without issue.
-
-**M11**
-- Implemented without issue.
-
-**M12**
-- Implemented without issue.
-
-**M13**
-- Implemented without issue.
-
-**M14**
-- Implemented without issue.
-
-**M15**
-- Implemented without issue. Self-deposit uses simplified direct path+deposit (no reservation) as agreed; reservation system deferred to M16. Hub unified into hub.mode / hub.mode_state enum (replacing the old placement-only table).
-
-**M16**
-- Implemented without issue. Offloading uses the full private haul activity path (activity_id, not secondary_haul_activity_id) as confirmed with user. Haul activity type is "haul" (special-cased in canClaim for serf class). Public ground pile haul activities are re-posted after each partial pickup trip.
 
 ## Phase 1 Milestones
 

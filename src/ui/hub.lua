@@ -17,37 +17,42 @@ hub.selected_type = nil
 hub.selected_tile_idx = nil   -- flat tile index used by renderer for the highlight
 
 -- Interaction mode: "normal" | "placing" | "designating" | "cancelling"
-hub.mode = "normal"
-hub.mode_state = {
-    type     = nil,     -- building type ("stockpile") or designation type ("chop")
-    dragging = false,
-    x1 = nil, y1 = nil,
-    x2 = nil, y2 = nil,
-}
+-- mode_state shapes:
+--   "normal"      → nil
+--   "cancelling"  → nil
+--   "placing"     → { building_type, orientation }  (orientation nil for player-sized/solid)
+--   "designating" → { designation_type }
+hub.mode       = "normal"
+hub.mode_state = nil
+
+-- Drag operation state (separate from mode configuration)
+hub.is_dragging = false
+hub.drag_x1     = nil
+hub.drag_y1     = nil
+hub.drag_x2     = nil
+hub.drag_y2     = nil
 
 local function screenToTile(sx, sy)
     local wx, wy = camera.screenToWorld(sx, sy)
     return math.floor(wx / TILE_SIZE) + 1, math.floor(wy / TILE_SIZE) + 1
 end
 
-function hub.enterMode(mode, mtype)
-    hub.selected      = nil
-    hub.selected_type = nil
-    hub.selected_tile_idx = nil
-    hub.mode = mode
-    hub.mode_state.type     = mtype
-    hub.mode_state.dragging = false
-    hub.mode_state.x1 = nil
-    hub.mode_state.y1 = nil
-    local mx, my = love.mouse.getPosition()
-    hub.mode_state.x2, hub.mode_state.y2 = screenToTile(mx, my)
-end
-
-function hub.exitMode()
-    hub.mode = "normal"
-    hub.mode_state.dragging = false
-    hub.mode_state.x1 = nil
-    hub.mode_state.y1 = nil
+function hub.setMode(mode, state)
+    hub.mode       = mode
+    hub.mode_state = state
+    hub.is_dragging = false
+    hub.drag_x1     = nil
+    hub.drag_y1     = nil
+    if mode ~= "normal" then
+        hub.selected          = nil
+        hub.selected_type     = nil
+        hub.selected_tile_idx = nil
+        local mx, my = love.mouse.getPosition()
+        hub.drag_x2, hub.drag_y2 = screenToTile(mx, my)
+    else
+        hub.drag_x2 = nil
+        hub.drag_y2 = nil
+    end
 end
 
 -- ─── Designation helpers ──────────────────────────────────────────────────────
@@ -92,45 +97,44 @@ end
 function hub.update()
     if hub.mode == "normal" then return end
     local mx, my = love.mouse.getPosition()
-    hub.mode_state.x2, hub.mode_state.y2 = screenToTile(mx, my)
+    hub.drag_x2, hub.drag_y2 = screenToTile(mx, my)
 end
 
 -- ─── Input ────────────────────────────────────────────────────────────────────
 
 function hub.mousepressed(x, y, button)
     local tx, ty = screenToTile(x, y)
-    local ms = hub.mode_state
 
     if hub.mode == "placing" then
         if button == 1 then
-            if ms.dragging == false then
-                ms.dragging = true
-                ms.x1, ms.y1 = tx, ty
+            if hub.is_dragging == false then
+                hub.is_dragging = true
+                hub.drag_x1, hub.drag_y1 = tx, ty
             end
         elseif button == 2 then
-            hub.exitMode()
+            hub.setMode("normal")
         end
         return
 
     elseif hub.mode == "designating" then
         if button == 1 then
-            if ms.dragging == false then
-                ms.dragging = true
-                ms.x1, ms.y1 = tx, ty
+            if hub.is_dragging == false then
+                hub.is_dragging = true
+                hub.drag_x1, hub.drag_y1 = tx, ty
             end
         elseif button == 2 then
-            hub.exitMode()
+            hub.setMode("normal")
         end
         return
 
     elseif hub.mode == "cancelling" then
         if button == 1 then
-            if ms.dragging == false then
-                ms.dragging = true
-                ms.x1, ms.y1 = tx, ty
+            if hub.is_dragging == false then
+                hub.is_dragging = true
+                hub.drag_x1, hub.drag_y1 = tx, ty
             end
         elseif button == 2 then
-            hub.exitMode()
+            hub.setMode("normal")
         end
         return
     end
@@ -138,8 +142,8 @@ function hub.mousepressed(x, y, button)
     -- Normal mode
     if button == 1 then
         if tx < 1 or tx > MAP_WIDTH or ty < 1 or ty > MAP_HEIGHT then
-            hub.selected      = nil
-            hub.selected_type = nil
+            hub.selected          = nil
+            hub.selected_type     = nil
             hub.selected_tile_idx = nil
             return
         end
@@ -150,29 +154,29 @@ function hub.mousepressed(x, y, button)
         for i = 1, #t.unit_ids do
             local u = registry[t.unit_ids[i]]
             if u.is_dead == false then
-                hub.selected      = u
-                hub.selected_type = "unit"
+                hub.selected          = u
+                hub.selected_type     = "unit"
                 hub.selected_tile_idx = tile_idx
                 return
             end
         end
 
         if t.building_id ~= nil then
-            hub.selected      = registry[t.building_id]
-            hub.selected_type = "building"
+            hub.selected          = registry[t.building_id]
+            hub.selected_type     = "building"
             hub.selected_tile_idx = tile_idx
             return
         end
 
         if t.ground_pile_id ~= nil then
-            hub.selected      = registry[t.ground_pile_id]
-            hub.selected_type = "ground pile"
+            hub.selected          = registry[t.ground_pile_id]
+            hub.selected_type     = "ground pile"
             hub.selected_tile_idx = tile_idx
             return
         end
 
-        hub.selected      = t
-        hub.selected_type = "tile"
+        hub.selected          = t
+        hub.selected_type     = "tile"
         hub.selected_tile_idx = tile_idx
 
     elseif button == 2 then
@@ -181,69 +185,72 @@ function hub.mousepressed(x, y, button)
                 units.startMove(hub.selected, tileIndex(tx, ty))
             end
         else
-            hub.selected      = nil
-            hub.selected_type = nil
+            hub.selected          = nil
+            hub.selected_type     = nil
             hub.selected_tile_idx = nil
         end
     end
 end
 
 function hub.mousereleased(x, y, button)
-    local ms = hub.mode_state
-    if ms.dragging == false then return end
+    if hub.is_dragging == false then return end
     if button ~= 1 then return end
-    ms.dragging = false
+    hub.is_dragging = false
 
-    local lx = math.min(ms.x1, ms.x2)
-    local rx = math.max(ms.x1, ms.x2)
-    local ty = math.min(ms.y1, ms.y2)
-    local by = math.max(ms.y1, ms.y2)
+    local lx = math.min(hub.drag_x1, hub.drag_x2)
+    local rx = math.max(hub.drag_x1, hub.drag_x2)
+    local ty = math.min(hub.drag_y1, hub.drag_y2)
+    local by = math.max(hub.drag_y1, hub.drag_y2)
 
     if hub.mode == "placing" then
-        if buildings.isValidPlacement(ms.x1, ms.y1, ms.x2, ms.y2) then
-            buildings.placeStockpile(ms.x1, ms.y1, ms.x2, ms.y2)
+        if buildings.isValidPlacement(hub.drag_x1, hub.drag_y1, hub.drag_x2, hub.drag_y2) then
+            buildings.placeStockpile(hub.drag_x1, hub.drag_y1, hub.drag_x2, hub.drag_y2)
         end
         local shift = love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")
         if shift == false then
-            hub.exitMode()
+            hub.setMode("normal")
         else
-            ms.x1 = nil; ms.y1 = nil
+            hub.drag_x1 = nil
+            hub.drag_y1 = nil
         end
 
     elseif hub.mode == "designating" then
-        designateRect(lx, rx, ty, by, ms.type)
-        ms.x1 = nil; ms.y1 = nil   -- mode persists
+        local ms = hub.mode_state
+        designateRect(lx, rx, ty, by, ms.designation_type)
+        hub.drag_x1 = nil
+        hub.drag_y1 = nil   -- mode persists
 
     elseif hub.mode == "cancelling" then
         cancelRect(lx, rx, ty, by)
-        ms.x1 = nil; ms.y1 = nil   -- mode persists
+        hub.drag_x1 = nil
+        hub.drag_y1 = nil   -- mode persists
     end
 end
 
 -- Returns true if the key was consumed.
 function hub.keypressed(key)
     if key == Keybinds.designate_chop then
-        hub.enterMode("designating", "chop")
+        hub.setMode("designating", { designation_type = "chop" })
         return true
     end
     if key == Keybinds.cancel_designation then
-        hub.enterMode("cancelling", nil)
+        hub.setMode("cancelling")
         return true
     end
     if key == "b" then
-        hub.enterMode("placing", "stockpile")
+        hub.setMode("placing", { building_type = "stockpile", orientation = nil })
         return true
     end
     if hub.mode ~= "normal" then
         if key == "escape" then
-            hub.exitMode()
+            hub.setMode("normal")
             return true
         end
         return false
     end
     if key == "escape" and hub.selected ~= nil then
-        hub.selected      = nil
-        hub.selected_type = nil
+        hub.selected          = nil
+        hub.selected_type     = nil
         hub.selected_tile_idx = nil
         return true
     end
@@ -258,13 +265,12 @@ local COL_DESIG     = { 0.95, 0.65, 0.10, 0.45 }
 local COL_CANCEL    = { 1, 0.20, 0.20, 0.45 }
 
 function hub.drawWorld()
-    local ms = hub.mode_state
-    if ms.x1 == nil or ms.x2 == nil then return end
+    if hub.drag_x1 == nil or hub.drag_x2 == nil then return end
 
-    local lx = math.min(ms.x1, ms.x2)
-    local rx = math.max(ms.x1, ms.x2)
-    local ty = math.min(ms.y1, ms.y2)
-    local by = math.max(ms.y1, ms.y2)
+    local lx = math.min(hub.drag_x1, hub.drag_x2)
+    local rx = math.max(hub.drag_x1, hub.drag_x2)
+    local ty = math.min(hub.drag_y1, hub.drag_y2)
+    local by = math.max(hub.drag_y1, hub.drag_y2)
     local ts = TILE_SIZE
 
     if hub.mode == "placing" then
@@ -282,7 +288,8 @@ function hub.drawWorld()
         end
 
     elseif hub.mode == "designating" then
-        local plant_type = DESIGNATION_PLANT[ms.type]
+        local ms = hub.mode_state
+        local plant_type = DESIGNATION_PLANT[ms.designation_type]
         for x = lx, rx do
             for y = ty, by do
                 if x >= 1 and x <= MAP_WIDTH and y >= 1 and y <= MAP_HEIGHT then

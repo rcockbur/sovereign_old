@@ -1,5 +1,5 @@
 # Sovereign — BEHAVIOR.md
-*v16 · Unit behavior: tick order, update loops, action system, classes and specialties.*
+*v17 · Unit behavior: tick order, update loops, action system, classes and specialties.*
 
 ## Simulation
 
@@ -385,7 +385,13 @@ When `build_cost` is empty (stockpiles), the construction sub-table has no bins 
 
 OFFLOADING
 
-If a unit becomes idle while carrying resources, it self-deposits to the nearest valid storage building (private activity with reservation). If no storage has capacity, resources are dropped via ground drop search at the unit's current position.
+When a unit becomes idle while carrying resources, `onActionComplete` routes to self-deposit at the nearest storage building with available capacity for the carried type. Offloading uses the full private haul activity pattern: post a haul activity (source = nil since resources are in `unit.carrying`, destination = chosen storage building), claim it via `activity_id` (not `secondary_haul_activity_id` — this is the unit's primary activity), reserve capacity at the destination. The haul activity type is `"haul"`, special-cased in `canClaim` so serfs can claim it.
+
+**Partial-fill chain.** If the chosen storage's available capacity is less than the carried amount, the reservation is for the partial amount only — `min(carried_amount, getAvailableCapacity(destination, type))`. On arrival the unit deposits that partial amount and releases the activity. `onActionComplete` fires again with the unit still carrying the remainder, which re-triggers offloading: find the next nearest storage with available capacity, post another haul activity, deliver the next portion. The chain repeats until the carry is empty or no storage anywhere has any capacity, at which point the remaining carry is dropped via ground drop search at the unit's current position.
+
+The partial-fill chain is shared by all offload paths, including eating self-fetch and equipment fetch where the "carry" is a fetched resource rather than produced output.
+
+**Public ground pile haul activities.** Ground piles self-post public haul activities (one per resource type). When a hauler claims and picks up a portion of a pile, the pile re-evaluates and re-posts a new haul activity for the remaining contents. Each pickup trip is a discrete activity — claim, travel, pick up, release — and the pile drives its own re-posting independent of the hauler's delivery-side partial-fill chain.
 
 EQUIPMENT WANTS
 

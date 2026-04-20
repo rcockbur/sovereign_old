@@ -1,5 +1,5 @@
 # Sovereign — ECONOMY.md
-*v12 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
+*v13 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
 
 ## Resource System
 
@@ -39,36 +39,46 @@ Five container types, each with reservation tracking for in-transit resources:
 ```lua
 bin = {
     container_type = "bin",
+    count_category = "housing",  -- "housing" | "processing" | "construction" — which resource_counts bucket this bin's contents feed
     type = "flour",      -- resource type this bin holds
     capacity = 128,      -- max weight (stackable) or max item count (items)
     contents = {},       -- flat array of entity ids
-    reserved_in = 0,     -- weight/count spoken for by inbound deliveries
-    reserved_out = 0,    -- weight/count spoken for by outbound pickups
+    reserved_in = 0,     -- amount spoken for by inbound deliveries
+    reserved_out = 0,    -- amount spoken for by outbound pickups
 }
 ```
 
-**Tile inventory** — array of building-owned tiles, each holding stacks (weight-capped) or one item. Used by: stockpiles. Each tile entry:
+**Tile inventory** — array of building-owned tiles, each holding stacks (weight-capped) or one item. Used by: stockpiles.
 
 ```lua
+tile_inventory = {
+    container_type = "tile_inventory",
+    count_category = "storage",
+    tile_capacity = STOCKPILE_TILE_CAPACITY,  -- per-tile weight capacity for stacks
+    tiles = {},          -- array of tile_entry, one per stockpile tile
+    filters = {},        -- per-type filter entries — see Storage Filter System
+}
+
 tile_entry = {
     contents = {},       -- flat array of entity ids
-    reserved_in = 0,
-    reserved_out = 0,
+    reserved_in = 0,     -- amount spoken for by inbound deliveries at this tile
+    reserved_out = 0,    -- amount spoken for by outbound pickups at this tile
 }
 ```
 
-Per-tile capacity is `STOCKPILE_TILE_CAPACITY` for stacks. Items: one per tile regardless of weight. A building-level `filters` table controls which types the stockpile accepts and how — see Storage Filter System for filter semantics.
+Items occupy one tile each regardless of weight. The tile_inventory's `filters` apply across all its tiles — filters are container-level, not per-tile.
 
 **Stack inventory** — flat array of stack entity ids with total weight capacity. Used by: warehouses. Only accepts stackable resources.
 
 ```lua
 stack_inventory = {
     container_type = "stack_inventory",
+    count_category = "storage",
     capacity = 0,        -- total weight capacity
     contents = {},       -- flat array of stack entity ids
     filters = {},        -- per-type filter entries (stackable resources only) — see Storage Filter System
-    reserved_in = 0,
-    reserved_out = 0,
+    reserved_in = 0,     -- amount spoken for by inbound deliveries
+    reserved_out = 0,    -- amount spoken for by outbound pickups
 }
 ```
 
@@ -77,11 +87,12 @@ stack_inventory = {
 ```lua
 item_inventory = {
     container_type = "item_inventory",
+    count_category = "storage",
     item_capacity = 40,  -- max number of items
     contents = {},       -- flat array of item entity ids
     filters = {},        -- per-type filter entries (items only) — see Storage Filter System
-    reserved_in = 0,
-    reserved_out = 0,
+    reserved_in = 0,     -- item count spoken for by inbound deliveries
+    reserved_out = 0,    -- item count spoken for by outbound pickups
 }
 ```
 
@@ -106,8 +117,10 @@ RESERVATION SYSTEM
 
 All containers use `reserved_in` and `reserved_out` to prevent collisions from concurrent resource movement. Ground piles use `reserved_out` only (nothing delivers into a ground pile).
 
-- **Available capacity** = capacity - used - reserved_in
-- **Available stock** = stock - reserved_out
+Both fields store **item amounts** across all container types — not weight units. Weight conversion is internal to capacity calculations only. Callers pass amounts to `reserve`, `releaseReservation`, `deposit`, and `withdraw`; `getAvailableCapacity` returns an amount, converting from the container's physical weight capacity internally via `floor((capacity - current_weight) / ResourceConfig[type].weight) - reserved_in`. This keeps units uniform across the whole API — no caller ever has to ask whether a given container counts in weight or amount.
+
+- **Available stock** = stock - reserved_out (in item amounts)
+- **Available capacity** = capacity - used - reserved_in (converted to amounts internally for weight-capped containers)
 
 Reservations are placed when a haul activity is claimed (whether public or private). Every resource transfer in the game goes through a haul activity — self-fetch, self-deposit, filter pull activities, construction delivery, merchant delivery, and ground pile cleanup all post activities and all use reservations.
 
@@ -183,11 +196,16 @@ RESOURCE COUNTS
 | `storage` | Stockpiles, warehouses, barns |
 | `processing` | Processing building input bins |
 | `housing` | Housing bins (food only) |
+| `construction` | Construction bins on buildings under construction |
+| `ground` | Ground piles |
 | `carrying` | `unit.carrying` |
 | `equipped` | `unit.equipped` |
-| `ground` | Ground piles |
 
 Each sub-table is `{ [type] = amount }`. Systems query the category they care about. The UI can sum whichever categories are relevant to the player.
+
+**Container dispatch enum.** Containers routed through the generic container API (`deposit`, `withdraw`, `transfer`, `reserve`) carry a `count_category` field whose valid values are `"storage"`, `"housing"`, `"processing"`, `"construction"`, and `"ground"` — five values, the set of buckets reachable through the container API. The remaining two buckets (`carrying` and `equipped`) are updated through dedicated unit-level APIs (`carryEntity`, `carryResource`, `withdrawFromCarrying`, `equip`, `unequip`) and don't need a dispatch field — those call sites statically know the destination bucket.
+
+**Distinction from `building.category`.** The `count_category` on a container is not the same field as `building.category`. `building.category` answers "what kind of building is this" and drives iteration filtering and UI dispatch. `count_category` on a container answers "which `resource_counts` bucket do my contents feed." They usually match (a cottage's housing bins have `count_category = "housing"` and the cottage has `building.category = "housing"`), but they diverge for construction — a half-built cottage has `building.category = "housing"` but its `construction.bins` have `count_category = "construction"` because the materials inside are committed to the build, not to housing.
 
 `resource_counts.storage_reserved` tracks the sum of `reserved_out` across all storage buildings, keyed by resource type. Updated alongside container-level reservation changes. This enables O(1) settlement-wide available stock: `storage[type] - storage_reserved[type]`. Used by the merchant to skip food types with no available stock and by any system that needs to short-circuit before scanning buildings.
 
@@ -249,10 +267,11 @@ A ground pile holds a flat array of entity ids (stacks and items mixed). No capa
 ```lua
 ground_pile = {
     container_type = "ground_pile",
+    count_category = "ground",
     id = 0,
     x = 0, y = 0,
     contents = {},       -- flat array of entity ids (stacks and items mixed)
-    reserved_out = 0,    -- reserved by haulers claiming pickup activities
+    reserved_out = 0,    -- amount spoken for by haulers claiming pickup activities
 }
 ```
 

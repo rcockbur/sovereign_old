@@ -8,20 +8,22 @@ local camera   = require("ui.camera")
 
 local renderer = {}
 
-local function unitScreenPos(u, ts, half)
-    local px = (u.x - 1) * ts + half
-    local py = (u.y - 1) * ts + half
-    if u.path ~= nil then
-        local next_idx  = u.path.tiles[u.path.current]
+local function unitScreenPos(unit, ts, half)
+    local px = (unit.x - 1) * ts + half
+    local py = (unit.y - 1) * ts + half
+    if unit.path ~= nil then
+        local next_idx  = unit.path.tiles[unit.path.current]
         local nx, ny    = tileXY(next_idx)
         local tile_cost = world.getTileCost(world.tiles[next_idx])
         if tile_cost ~= nil then
-            local dx = math.abs(nx - u.x)
-            local dy = math.abs(ny - u.y)
-            if dx == 1 and dy == 1 then tile_cost = tile_cost * SQRT2 end
-            local lerp_t = math.min(u.move_progress / tile_cost, 1.0)
-            px = px + (nx - u.x) * ts * lerp_t
-            py = py + (ny - u.y) * ts * lerp_t
+            local dx = math.abs(nx - unit.x)
+            local dy = math.abs(ny - unit.y)
+            if dx == 1 and dy == 1 then
+                tile_cost = tile_cost * SQRT2
+            end
+            local lerp_t = math.min(unit.move_progress / tile_cost, 1.0)
+            px = px + (nx - unit.x) * ts * lerp_t
+            py = py + (ny - unit.y) * ts * lerp_t
         end
     end
     return px, py
@@ -54,23 +56,23 @@ function renderer.drawWorld()
 
     for x = x_min, x_max do
         for y = y_min, y_max do
-            local t  = world.tiles[tileIndex(x, y)]
-            local px = (x - 1) * ts
-            local py = (y - 1) * ts
+            local tile = world.tiles[tileIndex(x, y)]
+            local px   = (x - 1) * ts
+            local py   = (y - 1) * ts
 
-            if t.terrain == "water" then
+            if tile.terrain == "water" then
                 love.graphics.setColor(COLOR_WATER)
-            elseif t.terrain == "rock" then
+            elseif tile.terrain == "rock" then
                 love.graphics.setColor(COLOR_ROCK)
             else
                 love.graphics.setColor(COLOR_GRASS)
             end
             love.graphics.rectangle("fill", px, py, ts, ts)
 
-            if t.plant_type == "tree" then
+            if tile.plant_type == "tree" then
                 love.graphics.setColor(COLOR_TREE)
                 love.graphics.circle("fill", px + half, py + half, half * 0.75)
-            elseif t.plant_type == "berry_bush" then
+            elseif tile.plant_type == "berry_bush" then
                 love.graphics.setColor(COLOR_BERRY)
                 love.graphics.circle("fill", px + half, py + half, half * 0.35)
             end
@@ -84,9 +86,9 @@ function renderer.drawUnits()
     local r    = half * 0.4
 
     for i = 1, #world.units do
-        local u = world.units[i]
-        if u.is_dead == false then
-            local px, py = unitScreenPos(u, ts, half)
+        local unit = world.units[i]
+        if unit.is_dead == false then
+            local px, py = unitScreenPos(unit, ts, half)
             love.graphics.setColor(COLOR_UNIT)
             love.graphics.circle("fill", px, py, r)
         end
@@ -107,12 +109,12 @@ function renderer.drawBuildings()
 
     local ts = TILE_SIZE
     for i = 1, #world.buildings do
-        local b = world.buildings[i]
-        if b.type == "stockpile" then
-            local x_min = math.max(b.x,                 vx_min)
-            local x_max = math.min(b.x + b.width  - 1,  vx_max)
-            local y_min = math.max(b.y,                 vy_min)
-            local y_max = math.min(b.y + b.height - 1,  vy_max)
+        local building = world.buildings[i]
+        if building.type == "stockpile" then
+            local x_min = math.max(building.x,                      vx_min)
+            local x_max = math.min(building.x + building.width  - 1, vx_max)
+            local y_min = math.max(building.y,                      vy_min)
+            local y_max = math.min(building.y + building.height - 1, vy_max)
             if x_min <= x_max and y_min <= y_max then
                 for x = x_min, x_max do
                     for y = y_min, y_max do
@@ -121,18 +123,18 @@ function renderer.drawBuildings()
                         love.graphics.setColor(COLOR_STOCKPILE)
                         love.graphics.rectangle("fill", px, py, ts, ts)
 
-                        local col        = x - b.x
-                        local row        = y - b.y
-                        local tile_entry = b.storage.tiles[col * b.height + row + 1]
+                        local col        = x - building.x
+                        local row        = y - building.y
+                        local tile_entry = building.storage.tiles[col * building.height + row + 1]
                         local used       = 0
                         for j = 1, #tile_entry.contents do
-                            local e = registry[tile_entry.contents[j]]
-                            local amt = e.amount ~= nil and e.amount or 1
-                            used = used + ResourceConfig[e.type].weight * amt
+                            local entity = registry[tile_entry.contents[j]]
+                            local amt    = entity.amount ~= nil and entity.amount or 1
+                            used = used + ResourceConfig[entity.type].weight * amt
                         end
 
                         if used > 0 then
-                            local pad = used >= b.storage.tile_capacity
+                            local pad = used >= building.storage.tile_capacity
                                 and math.floor(ts * 0.09)
                                 or  math.floor(ts * 0.34)
                             love.graphics.setColor(COLOR_STOCKPILE_FILL)
@@ -178,8 +180,8 @@ function renderer.drawDesignations()
 
     for x = x_min, x_max do
         for y = y_min, y_max do
-            local t = world.tiles[tileIndex(x, y)]
-            if t.designation == "chop" then
+            local tile = world.tiles[tileIndex(x, y)]
+            if tile.designation == "chop" then
                 love.graphics.setColor(COLOR_DESIG_CHOP)
                 love.graphics.rectangle("fill",
                     (x - 1) * ts + pad, (y - 1) * ts + pad, size, size)
@@ -189,7 +191,9 @@ function renderer.drawDesignations()
 end
 
 function renderer.drawSelection(selected, selected_type, tile_idx)
-    if selected == nil then return end
+    if selected == nil then
+        return
+    end
     love.graphics.setColor(1, 1, 1, 0.7)
 
     if selected_type == "unit" then

@@ -119,23 +119,23 @@ local function displayUnitInfo(unit, lines)
 
     -- Action
     sec(lines, "action")
-    local act = unit.current_action
-    if act.type == "work" then
-        row(lines, "  work  " .. act.progress .. " / " .. act.work_ticks)
-    elseif act.type == "travel" then
-        local step = unit.path and unit.path.current or "?"
+    local action = unit.current_action
+    if action.type == "work" then
+        row(lines, "  work  " .. action.progress .. " / " .. action.work_ticks)
+    elseif action.type == "travel" then
+        local step  = unit.path and unit.path.current or "?"
         local total = unit.path and #unit.path.tiles or "?"
         row(lines, "  travel  step " .. tostring(step) .. " / " .. tostring(total))
     else
-        row(lines, "  " .. act.type)
+        row(lines, "  " .. action.type)
     end
 
     -- Activity
     if unit.activity_id ~= nil then
-        local a = registry[unit.activity_id]
-        if a ~= nil then
-            local loc = "(" .. a.x .. "," .. a.y .. ")"
-            row(lines, "  activity: " .. a.type .. " #" .. a.id .. " " .. loc)
+        local activity = registry[unit.activity_id]
+        if activity ~= nil then
+            local loc = "(" .. activity.x .. "," .. activity.y .. ")"
+            row(lines, "  activity: " .. activity.type .. " #" .. activity.id .. " " .. loc)
         else
             row(lines, "  activity: #" .. unit.activity_id .. " (stale)")
         end
@@ -143,9 +143,9 @@ local function displayUnitInfo(unit, lines)
         row(lines, "  activity: none")
     end
     if unit.secondary_haul_activity_id ~= nil then
-        local h = registry[unit.secondary_haul_activity_id]
-        if h ~= nil then
-            row(lines, "  haul: " .. h.type .. " #" .. h.id)
+        local haul_activity = registry[unit.secondary_haul_activity_id]
+        if haul_activity ~= nil then
+            row(lines, "  haul: " .. haul_activity.type .. " #" .. haul_activity.id)
         else
             row(lines, "  haul: #" .. unit.secondary_haul_activity_id .. " (stale)")
         end
@@ -174,12 +174,12 @@ local function displayUnitInfo(unit, lines)
         row(lines, "  (empty)")
     else
         for i = 1, #unit.carrying do
-            local e = registry[unit.carrying[i]]
-            if e ~= nil then
-                if e.amount ~= nil then
-                    row(lines, "  " .. e.type .. " x" .. e.amount)
+            local entity = registry[unit.carrying[i]]
+            if entity ~= nil then
+                if entity.amount ~= nil then
+                    row(lines, "  " .. entity.type .. " x" .. entity.amount)
                 else
-                    row(lines, "  " .. e.type .. " (item)")
+                    row(lines, "  " .. entity.type .. " (item)")
                 end
             end
         end
@@ -239,7 +239,7 @@ local function displayBuildingInfo(building, lines)
             row(lines, "    Tile "..tile_index.." - Resource "..resource_id.." - "..resource.amount.." "..resource.type)
         end
     end
-    
+
     row(lines, "")
 end
 

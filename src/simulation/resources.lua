@@ -16,7 +16,9 @@ local resources = {}
 
 local function addToCount(tally, type, delta)
     tally[type] = (tally[type] or 0) + delta
-    if tally[type] == 0 then tally[type] = nil end
+    if tally[type] == 0 then
+        tally[type] = nil
+    end
 end
 
 local function isStack(entity)
@@ -28,8 +30,8 @@ local function entityAmount(entity)
 end
 
 local function entityWeight(entity_id)
-    local e = registry[entity_id]
-    return ResourceConfig[e.type].weight * entityAmount(e)
+    local entity = registry[entity_id]
+    return ResourceConfig[entity.type].weight * entityAmount(entity)
 end
 
 local function tileUsedWeight(tile_entry)
@@ -47,7 +49,7 @@ local function containerCategory(container)
     elseif ct == "ground_pile" then
         return "ground"
     elseif ct == "bin" then
-        return container.category
+        return container.count_category
     end
     error("unknown container_type: " .. tostring(ct))
 end
@@ -56,14 +58,20 @@ end
 
 local function tileHasType(tile_entry, type)
     for i = 1, #tile_entry.contents do
-        if registry[tile_entry.contents[i]].type == type then return true end
+        local entity = registry[tile_entry.contents[i]]
+        if entity.type == type then
+            return true
+        end
     end
     return false
 end
 
 local function tileHasOther(tile_entry, type)
     for i = 1, #tile_entry.contents do
-        if registry[tile_entry.contents[i]].type ~= type then return true end
+        local entity = registry[tile_entry.contents[i]]
+        if entity.type ~= type then
+            return true
+        end
     end
     return false
 end
@@ -71,8 +79,10 @@ end
 local function tileStockOfType(tile_entry, type)
     local n = 0
     for i = 1, #tile_entry.contents do
-        local e = registry[tile_entry.contents[i]]
-        if e.type == type then n = n + entityAmount(e) end
+        local entity = registry[tile_entry.contents[i]]
+        if entity.type == type then
+            n = n + entityAmount(entity)
+        end
     end
     return n
 end
@@ -138,9 +148,9 @@ function resources.getStock(container, type)
     elseif ct == "bin" or ct == "stack_inventory" or ct == "item_inventory" or ct == "ground_pile" then
         local total = 0
         for i = 1, #container.contents do
-            local e = registry[container.contents[i]]
-            if e.type == type then
-                total = total + entityAmount(e)
+            local entity = registry[container.contents[i]]
+            if entity.type == type then
+                total = total + entityAmount(entity)
             end
         end
         return total
@@ -300,19 +310,23 @@ function resources.withdraw(container, type, amount)
 
     if ct == "tile_inventory" then
         for _, tile_entry in ipairs(container.tiles) do
-            if remaining <= 0 then break end
+            if remaining <= 0 then
+                break
+            end
             for i = #tile_entry.contents, 1, -1 do
-                if remaining <= 0 then break end
-                local eid = tile_entry.contents[i]
-                local e   = registry[eid]
-                if e.type == type then
-                    if e.amount <= remaining then
-                        remaining = remaining - e.amount
+                if remaining <= 0 then
+                    break
+                end
+                local eid    = tile_entry.contents[i]
+                local entity = registry[eid]
+                if entity.type == type then
+                    if entity.amount <= remaining then
+                        remaining = remaining - entity.amount
                         result[#result + 1] = eid
                         table.remove(tile_entry.contents, i)
-                        addToCount(world.resource_counts[cat], type, -e.amount)
+                        addToCount(world.resource_counts[cat], type, -entity.amount)
                     else
-                        e.amount = e.amount - remaining
+                        entity.amount = entity.amount - remaining
                         local split = registry.createEntity(world.stacks, { type = type, amount = remaining })
                         result[#result + 1] = split.id
                         addToCount(world.resource_counts[cat], type, -remaining)
@@ -323,18 +337,20 @@ function resources.withdraw(container, type, amount)
         end
     elseif ct == "bin" or ct == "stack_inventory" or ct == "ground_pile" then
         for i = #container.contents, 1, -1 do
-            if remaining <= 0 then break end
-            local eid = container.contents[i]
-            local e   = registry[eid]
-            if e.type == type then
-                if e.amount ~= nil then
-                    if e.amount <= remaining then
-                        remaining = remaining - e.amount
+            if remaining <= 0 then
+                break
+            end
+            local eid    = container.contents[i]
+            local entity = registry[eid]
+            if entity.type == type then
+                if entity.amount ~= nil then
+                    if entity.amount <= remaining then
+                        remaining = remaining - entity.amount
                         result[#result + 1] = eid
                         table.remove(container.contents, i)
-                        addToCount(world.resource_counts[cat], type, -e.amount)
+                        addToCount(world.resource_counts[cat], type, -entity.amount)
                     else
-                        e.amount = e.amount - remaining
+                        entity.amount = entity.amount - remaining
                         local split = registry.createEntity(world.stacks, { type = type, amount = remaining })
                         result[#result + 1] = split.id
                         addToCount(world.resource_counts[cat], type, -remaining)
@@ -351,10 +367,12 @@ function resources.withdraw(container, type, amount)
         end
     elseif ct == "item_inventory" then
         for i = #container.contents, 1, -1 do
-            if remaining <= 0 then break end
-            local eid = container.contents[i]
-            local e   = registry[eid]
-            if e.type == type then
+            if remaining <= 0 then
+                break
+            end
+            local eid    = container.contents[i]
+            local entity = registry[eid]
+            if entity.type == type then
                 remaining = remaining - 1
                 result[#result + 1] = eid
                 table.remove(container.contents, i)
@@ -408,15 +426,15 @@ local function recalcMoveSpeed(unit)
 end
 
 function resources.carryEntity(unit, entity_id)
-    local e = registry[entity_id]
-    assert(isStack(e), "carryEntity: entity is not a stack")
+    local entity = registry[entity_id]
+    assert(isStack(entity), "carryEntity: entity is not a stack")
 
     if #unit.carrying == 0 then
         unit.carrying[1] = entity_id
     else
         local existing = registry[unit.carrying[1]]
-        assert(existing.type == e.type, "carryEntity: carrying type mismatch")
-        existing.amount = existing.amount + e.amount
+        assert(existing.type == entity.type, "carryEntity: carrying type mismatch")
+        existing.amount = existing.amount + entity.amount
         registry[entity_id] = nil
         local stacks = world.stacks
         for i = 1, #stacks do
@@ -428,7 +446,7 @@ function resources.carryEntity(unit, entity_id)
         end
     end
 
-    addToCount(world.resource_counts.carrying, e.type, e.amount)
+    addToCount(world.resource_counts.carrying, entity.type, entity.amount)
     recalcMoveSpeed(unit)
 end
 
@@ -455,17 +473,19 @@ function resources.withdrawFromCarrying(unit, type, amount)
     local remaining = amount
 
     for i = #unit.carrying, 1, -1 do
-        if remaining <= 0 then break end
-        local eid = unit.carrying[i]
-        local e   = registry[eid]
-        if e.type == type then
-            if e.amount <= remaining then
-                remaining = remaining - e.amount
+        if remaining <= 0 then
+            break
+        end
+        local eid    = unit.carrying[i]
+        local entity = registry[eid]
+        if entity.type == type then
+            if entity.amount <= remaining then
+                remaining = remaining - entity.amount
                 result[#result + 1] = eid
                 table.remove(unit.carrying, i)
-                addToCount(world.resource_counts.carrying, type, -e.amount)
+                addToCount(world.resource_counts.carrying, type, -entity.amount)
             else
-                e.amount = e.amount - remaining
+                entity.amount = entity.amount - remaining
                 local split = registry.createEntity(world.stacks, { type = type, amount = remaining })
                 result[#result + 1] = split.id
                 addToCount(world.resource_counts.carrying, type, -remaining)
@@ -482,17 +502,19 @@ end
 -- ── Equip operations ──────────────────────────────────────────────────────────
 
 function resources.equip(unit, slot, item_id)
-    local e = registry[item_id]
+    local entity = registry[item_id]
     unit.equipped[slot] = item_id
-    addToCount(world.resource_counts.equipped, e.type, 1)
+    addToCount(world.resource_counts.equipped, entity.type, 1)
 end
 
 function resources.unequip(unit, slot)
     local item_id = unit.equipped[slot]
-    if item_id == nil then return nil end
-    local e = registry[item_id]
+    if item_id == nil then
+        return nil
+    end
+    local entity = registry[item_id]
     unit.equipped[slot] = nil
-    addToCount(world.resource_counts.equipped, e.type, -1)
+    addToCount(world.resource_counts.equipped, entity.type, -1)
     return item_id
 end
 
@@ -567,6 +589,7 @@ local GROUND_DIRS = { {0,-1}, {0,1}, {-1,0}, {1,0} }
 function resources.createGroundPile(x, y)
     local gp = registry.createEntity(world.ground_piles, {
         container_type = "ground_pile",
+        count_category = "ground",
         x = x, y = y,
         contents     = {},
         reserved_out = {},
@@ -656,7 +679,9 @@ end
 -- Drops all resources carried by unit to the ground near their position.
 -- Returns the ground pile, or nil if unit was not carrying anything.
 function resources.groundDrop(unit)
-    if #unit.carrying == 0 then return nil end
+    if #unit.carrying == 0 then
+        return nil
+    end
     local stack  = registry[unit.carrying[1]]
     local rtype  = stack.type
     local amount = stack.amount
@@ -686,9 +711,9 @@ function resources.create(type, amount)
 end
 
 function resources.destroy(entity_id)
-    local e = registry[entity_id]
+    local entity = registry[entity_id]
     registry[entity_id] = nil
-    local collection = isStack(e) and world.stacks or world.items
+    local collection = isStack(entity) and world.stacks or world.items
     for i = 1, #collection do
         if collection[i].id == entity_id then
             collection[i] = collection[#collection]
@@ -706,55 +731,56 @@ function resources.rebuildCounts()
     rc.storage_reserved = {}
     rc.processing       = {}
     rc.housing          = {}
+    rc.construction     = {}
     rc.carrying         = {}
     rc.equipped         = {}
     rc.ground           = {}
 
     for i = 1, #world.buildings do
-        local b = world.buildings[i]
-        if b.storage ~= nil then
-            local ct = b.storage.container_type
+        local building = world.buildings[i]
+        if building.storage ~= nil then
+            local ct = building.storage.container_type
             if ct == "tile_inventory" then
-                for _, tile_entry in ipairs(b.storage.tiles) do
+                for _, tile_entry in ipairs(building.storage.tiles) do
                     for j = 1, #tile_entry.contents do
-                        local e = registry[tile_entry.contents[j]]
-                        addToCount(rc.storage, e.type, entityAmount(e))
+                        local entity = registry[tile_entry.contents[j]]
+                        addToCount(rc.storage, entity.type, entityAmount(entity))
                     end
                 end
-                for rtype, amt in pairs(b.storage.reserved_out) do
+                for rtype, amt in pairs(building.storage.reserved_out) do
                     addToCount(rc.storage_reserved, rtype, amt)
                 end
             elseif ct == "stack_inventory" then
-                for j = 1, #b.storage.contents do
-                    local e = registry[b.storage.contents[j]]
-                    addToCount(rc.storage, e.type, e.amount)
+                for j = 1, #building.storage.contents do
+                    local entity = registry[building.storage.contents[j]]
+                    addToCount(rc.storage, entity.type, entity.amount)
                 end
-                for rtype, amt in pairs(b.storage.reserved_out) do
+                for rtype, amt in pairs(building.storage.reserved_out) do
                     addToCount(rc.storage_reserved, rtype, amt)
                 end
             elseif ct == "item_inventory" then
-                for j = 1, #b.storage.contents do
-                    local e = registry[b.storage.contents[j]]
-                    addToCount(rc.storage, e.type, 1)
+                for j = 1, #building.storage.contents do
+                    local entity = registry[building.storage.contents[j]]
+                    addToCount(rc.storage, entity.type, 1)
                 end
-                for rtype, amt in pairs(b.storage.reserved_out) do
+                for rtype, amt in pairs(building.storage.reserved_out) do
                     addToCount(rc.storage_reserved, rtype, amt)
                 end
             end
         end
-        if b.housing ~= nil then
-            for _, bin in ipairs(b.housing.bins) do
+        if building.housing ~= nil then
+            for _, bin in ipairs(building.housing.bins) do
                 for j = 1, #bin.contents do
-                    local e = registry[bin.contents[j]]
-                    addToCount(rc.housing, e.type, entityAmount(e))
+                    local entity = registry[bin.contents[j]]
+                    addToCount(rc.housing, entity.type, entityAmount(entity))
                 end
             end
         end
-        if b.production ~= nil and b.production.input_bins ~= nil then
-            for _, bin in ipairs(b.production.input_bins) do
+        if building.production ~= nil and building.production.input_bins ~= nil then
+            for _, bin in ipairs(building.production.input_bins) do
                 for j = 1, #bin.contents do
-                    local e = registry[bin.contents[j]]
-                    addToCount(rc.processing, e.type, entityAmount(e))
+                    local entity = registry[bin.contents[j]]
+                    addToCount(rc.processing, entity.type, entityAmount(entity))
                 end
             end
         end
@@ -763,23 +789,23 @@ function resources.rebuildCounts()
     for i = 1, #world.ground_piles do
         local gp = world.ground_piles[i]
         for j = 1, #gp.contents do
-            local e = registry[gp.contents[j]]
-            addToCount(rc.ground, e.type, entityAmount(e))
+            local entity = registry[gp.contents[j]]
+            addToCount(rc.ground, entity.type, entityAmount(entity))
         end
     end
 
     for i = 1, #world.units do
-        local u = world.units[i]
-        if u.is_dead == false then
-            for j = 1, #u.carrying do
-                local e = registry[u.carrying[j]]
-                addToCount(rc.carrying, e.type, entityAmount(e))
+        local unit = world.units[i]
+        if unit.is_dead == false then
+            for j = 1, #unit.carrying do
+                local entity = registry[unit.carrying[j]]
+                addToCount(rc.carrying, entity.type, entityAmount(entity))
             end
-            if u.equipped ~= nil then
-                for slot, item_id in pairs(u.equipped) do
+            if unit.equipped ~= nil then
+                for slot, item_id in pairs(unit.equipped) do
                     if item_id ~= nil then
-                        local e = registry[item_id]
-                        addToCount(rc.equipped, e.type, 1)
+                        local entity = registry[item_id]
+                        addToCount(rc.equipped, entity.type, 1)
                     end
                 end
             end
@@ -792,15 +818,15 @@ function resources.validateCounts()
     resources.rebuildCounts()
 
     local function assertMatch(cat)
-        local s = saved[cat]
-        local f = world.resource_counts[cat]
-        for type, amount in pairs(s) do
-            assert((f[type] or 0) == amount,
-                "validateCounts: " .. cat .. "[" .. type .. "] mismatch: saved=" .. amount .. " rebuilt=" .. (f[type] or 0))
+        local saved_counts = saved[cat]
+        local fresh_counts = world.resource_counts[cat]
+        for type, amount in pairs(saved_counts) do
+            assert((fresh_counts[type] or 0) == amount,
+                "validateCounts: " .. cat .. "[" .. type .. "] mismatch: saved=" .. amount .. " rebuilt=" .. (fresh_counts[type] or 0))
         end
-        for type, amount in pairs(f) do
-            assert((s[type] or 0) == amount,
-                "validateCounts: " .. cat .. "[" .. type .. "] mismatch: saved=" .. (s[type] or 0) .. " rebuilt=" .. amount)
+        for type, amount in pairs(fresh_counts) do
+            assert((saved_counts[type] or 0) == amount,
+                "validateCounts: " .. cat .. "[" .. type .. "] mismatch: saved=" .. (saved_counts[type] or 0) .. " rebuilt=" .. amount)
         end
     end
 
@@ -810,6 +836,7 @@ function resources.validateCounts()
     assertMatch("ground")
     assertMatch("housing")
     assertMatch("processing")
+    assertMatch("construction")
     assertMatch("equipped")
 end
 
@@ -818,13 +845,13 @@ function resources.findNearestStorage(unit, type, min_capacity)
     local best_dist     = nil
     local best_building = nil
     for i = 1, #world.buildings do
-        local b = world.buildings[i]
-        if b.is_deleted == false and b.storage ~= nil then
-            if resources.getAvailableCapacity(b.storage, type) >= min_capacity then
-                local dist = math.abs(unit.x - b.x) + math.abs(unit.y - b.y)
+        local building = world.buildings[i]
+        if building.is_deleted == false and building.storage ~= nil then
+            if resources.getAvailableCapacity(building.storage, type) >= min_capacity then
+                local dist = math.abs(unit.x - building.x) + math.abs(unit.y - building.y)
                 if best_dist == nil or dist < best_dist then
                     best_dist     = dist
-                    best_building = b
+                    best_building = building
                 end
             end
         end

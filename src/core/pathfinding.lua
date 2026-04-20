@@ -40,15 +40,21 @@ local function heapPop()
     heap_n = heap_n - 1
     local i = 1
     while true do
-        local l = 2 * i
-        local r = 2 * i + 1
-        local s = i
-        if l <= heap_n and heap_f[l] < heap_f[s] then s = l end
-        if r <= heap_n and heap_f[r] < heap_f[s] then s = r end
-        if s == i then break end
-        heap_f[i],   heap_f[s]   = heap_f[s],   heap_f[i]
-        heap_idx[i], heap_idx[s] = heap_idx[s], heap_idx[i]
-        i = s
+        local l       = 2 * i
+        local r       = 2 * i + 1
+        local smallest = i
+        if l <= heap_n and heap_f[l] < heap_f[smallest] then
+            smallest = l
+        end
+        if r <= heap_n and heap_f[r] < heap_f[smallest] then
+            smallest = r
+        end
+        if smallest == i then
+            break
+        end
+        heap_f[i],   heap_f[smallest]   = heap_f[smallest],   heap_f[i]
+        heap_idx[i], heap_idx[smallest] = heap_idx[smallest], heap_idx[i]
+        i = smallest
     end
     return f, idx
 end
@@ -56,8 +62,12 @@ end
 local getTileCost = world.getTileCost
 
 local function clamp(v, lo, hi)
-    if v < lo then return lo end
-    if v > hi then return hi end
+    if v < lo then
+        return lo
+    end
+    if v > hi then
+        return hi
+    end
     return v
 end
 

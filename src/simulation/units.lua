@@ -16,8 +16,10 @@ Unit.__index = Unit
 
 function units.spawnSerf(x, y)
     local tile_idx = tileIndex(x, y)
-    local t = world.tiles[tile_idx]
-    if t.target_of_unit ~= nil then return nil end
+    local tile = world.tiles[tile_idx]
+    if tile.target_of_unit ~= nil then
+        return nil
+    end
 
     local gender     = math.random() < 0.5 and "male" or "female"
     local name_list  = gender == "male" and NameConfig.male or NameConfig.female
@@ -72,8 +74,8 @@ function units.spawnSerf(x, y)
     }, Unit))
 
     unit.target_tile   = tile_idx
-    t.target_of_unit   = unit.id
-    t.unit_ids[#t.unit_ids + 1] = unit.id
+    tile.target_of_unit   = unit.id
+    tile.unit_ids[#tile.unit_ids + 1] = unit.id
 
     log:info("UNIT", "Spawned %s %s at (%d, %d)", unit.name, unit.surname, x, y)
     return unit
@@ -92,7 +94,9 @@ function units.spawnStarting()
             if world.tiles[tileIndex(x, y)].target_of_unit == nil then
                 units.spawnSerf(x, y)
                 count = count + 1
-                if count == 6 then return end
+                if count == 6 then
+                    return
+                end
             end
         end
     end
@@ -105,7 +109,9 @@ function Unit:recalcMoveSpeed()
 end
 
 function Unit:moveStep()
-    if self.path == nil then return end
+    if self.path == nil then
+        return
+    end
     if self.path.current > #self.path.tiles then
         self.path = nil
         return
@@ -222,8 +228,8 @@ function Unit:tick()
 
     -- Per-tick step 2: decrement work day counter for work-purpose activities
     if self.activity_id ~= nil then
-        local act = registry[self.activity_id]
-        if act ~= nil and act.purpose == "work" then
+        local activity = registry[self.activity_id]
+        if activity ~= nil and activity.purpose == "work" then
             if self.work_ticks_remaining > 0 then
                 self.work_ticks_remaining = self.work_ticks_remaining - 1
             end
@@ -305,7 +311,9 @@ end
 function units.startMoveAdjacentToRect(unit, rx, ry, rw, rh)
     local start_idx = tileIndex(unit.x, unit.y)
     local path = pathfinding.findPathAdjacentToRect(world.tiles, start_idx, rx, ry, rw, rh)
-    if path == nil then return false end
+    if path == nil then
+        return false
+    end
 
     if #path.tiles > 0 then
         local goal_idx = path.tiles[#path.tiles]
