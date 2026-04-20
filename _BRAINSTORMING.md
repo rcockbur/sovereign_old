@@ -1,5 +1,5 @@
 # Sovereign — BRAINSTORMING.md
-*v2 · Loosely defined ideas, deferred systems, and content slated for later development. Upload to Claude.ai sessions when relevant.*
+*v3 · Loosely defined ideas, deferred systems, and content slated for later development. Upload to Claude.ai sessions when relevant.*
 
 ## Creatures and Encounters
 
@@ -245,11 +245,94 @@ Resolution priority:
 
 Homeless children are always the player's fault in a solvable way. A boarding house is cheap to build. If children are dying of exposure, the player neglected to build one.
 
-ECONOMY
+## Relationships and Courtship
 
-No money system. The communal economy (village produces collectively, units consume based on need and class) is the correct model for this scale. Orphan hardship is expressed through existing mechanics: no adult labor capacity, no skilled production, no home improvement. Money would require wages, prices, and a market economy that touches every production chain — enormous complexity for problems the existing systems already communicate.
+*Direction established via design session. Not yet designed — captures intent and constraints for future design work.*
 
-External trade (unphased) can work through barter. The currency question can be revisited if external trade design demands it, but should not be assumed.
+COMPATIBILITY
+
+Compatibility is a deterministic score between any two units that affects the probability of both friendship and courtship forming. Three inputs:
+
+- **Age proximity** — closer in age = higher compatibility. Falloff from age difference, not a cliff. Naturally creates generational friend groups.
+- **Charisma** — the higher-charisma unit in the pair contributes a bonus. High-charisma units are more likable, making them more likely to form relationships with anyone. Gives charisma a concrete social role.
+- **Pair seed** — a deterministic hash of the two unit IDs (e.g., `(id_a * 31 + id_b * 7) % 100`). The "some people just click" factor. Not visible to the player. Prevents compatibility from being fully predictable from inspectable stats.
+
+No class factor in compatibility. Class already shapes proximity through workplace assignment — freemen at the same workshop naturally check against each other more often. That's enough organic class clustering without making it a rule.
+
+No trait factor yet. Traits are rare enough that building compatibility interactions adds complexity for a case that almost never fires. Revisitable later if traits like Gregarious/Solitary get mechanical values.
+
+PROXIMITY CHECK
+
+Relationships form through periodic proximity checks, not continuous tracking. The check fires once during each unit's evening recreation, after they arrive at their recreation destination:
+
+- **Tavern**: all units currently at the tavern are candidates.
+- **Wandering**: units within a small radius of the wander destination (3–4 tiles). Looser than "same tile" to account for neighbors outside at the same time.
+
+For each candidate, if both are eligible (not already friends/enemies, not blocked by friend scaling), roll compatibility against a threshold. If it passes, the relationship forms.
+
+The tavern is a friendship engine — more units visiting the tavern means more proximity checks, means more friendships. Shorter work days → more tavern time → richer social life. Wandering produces friendships too, but less reliably since encounters are sparser.
+
+FRIENDSHIP FORMATION
+
+Friendships form from the proximity check when compatibility passes. Up to 3 friends per unit (hard cap), bidirectional. No "best friend" ranking — all three are equal.
+
+Friendship scaling — the chance of forming a new friendship decreases with current friend count:
+
+| Current friends | Multiplier |
+|---|---|
+| 0 | 1.0 |
+| 1 | 0.4 |
+| 2 | 0.1 |
+
+At 3, no check fires (hard cap). The curve is steep enough that most units plateau at 1 friend, socially active units reach 2, and reaching 3 is a genuine rarity that marks a unit as notably popular. A long-lived, high-charisma unit who frequents the tavern might hit 3 after many years.
+
+This scaling also means friend death is significant beyond the mood hit. Losing a friend puts the unit back to a higher multiplier, so they're likely to eventually form a new one. Losing your only friend when you're old and most peers are dead? You might stay at 0 for the rest of your life.
+
+WHAT FRIENDS DO
+
+- **`friend_death` mood modifier** — already in MoodModifierConfig (-10, 7 days).
+- **Recreation preference** — during evening recreation selection, a unit with friends prefers to go where a friend is. If a friend is at the tavern, bias toward the tavern. If no tavern, wander toward a friend's home. Purely behavioral flavor — no new mechanics, just a preference in existing recreation selection.
+- **Funeral attendance priority** — friends of the deceased always attend the funeral.
+- **No productivity bonus.** Friendship affecting work speed would be invisible and hard to read. Keep it in the mood/social domain.
+
+ENEMY FORMATION
+
+Enemies are rarer than friends. Two formation triggers, both tied to the mood system:
+
+- **Mood-driven friction** — a distraught unit (mood below 20) who shares a workplace or home with another unit has a small chance of forming an enmity. Misery makes people hostile.
+- **Deviancy spillover** — if a unit commits a deviancy act, the target of that behavior becomes an enemy.
+
+Both triggers mean the player's management decisions (work hours, housing, food supply) indirectly control whether enemies form.
+
+Up to 3 enemies per unit (hard cap), bidirectional. No scaling — enemies are already rare enough through their limited triggers.
+
+WHAT ENEMIES DO
+
+- **Mood penalty when sharing a workplace** — a small persistent penalty (around -5) while an enemy is assigned to the same building. Gives the player a legible reason to reassign workers.
+- **Deviancy amplifier** — enemies at the same workplace increase the chance of deviancy events for both units when mood is already low. Compounds existing problems rather than creating new ones.
+- **No combat/violence between enemies.** That's a different system.
+
+COURTSHIP
+
+Courtship uses the same proximity check as friendship, with additional filters: both must be unmarried adults (16+), opposite gender, not related (parent/child/sibling check against family IDs), and an empty home must exist in the settlement.
+
+Existing friends who are eligible for courtship get a compatibility bonus on the courtship roll. A friendship can naturally evolve into a romance, but it's not required — strangers can meet at the tavern and start courting.
+
+If the compatibility roll passes, courtship begins. Courtship duration is variable (2–4 seasons, randomized per pair). During courtship:
+
+- The pair is flagged as courting (visible on unit panel, notification on courtship start).
+- Courting units prefer each other during recreation — bias toward tavern if partner is there, wander toward partner's home otherwise.
+- No behavioral change beyond recreation preference. They still work normally.
+
+Courtship is exclusive — courting units are ineligible for new courtship rolls. If one dies during courtship, the survivor becomes eligible again immediately (they weren't married, no grief period).
+
+MARRIAGE
+
+At the end of the courtship timer, marriage fires if an empty home still exists. If no home is available, courtship stalls (timer frozen) until one opens up. Courtship doesn't break from housing shortage — it just waits.
+
+On marriage: the couple forms a family, moves into the smallest available empty home, and the wedding event triggers. Cross-class marriage promotes the lower-class spouse (a serf marrying a freeman becomes a freeman), which costs the player economically through higher class expectations.
+
+Courtship does not require co-location to progress — the timer ticks in the background regardless of whether the pair spends time together. The recreation preference for spending time with the courting partner provides behavioral flavor without gating progression.
 
 ## Childhood Phases
 
@@ -334,3 +417,9 @@ Each phase of childhood tells the player something new about the unit and gives 
 ## Gentry Activities
 
 Currently gentry units idle and consume resources. Future design space exists for gentry-specific activities that provide indirect benefits: hunting, holding court, overseeing the settlement, socializing. These could provide passive bonuses (morale, productivity) without gentry directly participating in the economy.
+
+ECONOMY
+
+No money system. The communal economy (village produces collectively, units consume based on need and class) is the correct model for this scale. Orphan hardship is expressed through existing mechanics: no adult labor capacity, no skilled production, no home improvement. Money would require wages, prices, and a market economy that touches every production chain — enormous complexity for problems the existing systems already communicate.
+
+External trade (unphased) can work through barter. The currency question can be revisited if external trade design demands it, but should not be assumed.
