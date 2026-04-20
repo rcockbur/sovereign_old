@@ -17,30 +17,32 @@ function generating.enter()
 end
 
 function generating.update()
-    if gen_co == nil then return end
+    if gen_co == nil then
+        return
+    end
 
-    local ok, frac, lbl = coroutine.resume(gen_co)
-    assert(ok, frac)
+    local ok, new_progress, new_label = coroutine.resume(gen_co)
+    assert(ok, new_progress)
 
     if coroutine.status(gen_co) == "dead" then
         gen_co = nil
         gamestate:switch(require("app.playing"))
     else
-        progress = frac or progress
-        label    = lbl  or label
+        progress = new_progress or progress
+        label    = new_label    or label
     end
 end
 
 function generating.draw()
-    local sw = love.graphics.getWidth()
-    local sh = love.graphics.getHeight()
+    local screen_width  = love.graphics.getWidth()
+    local screen_height = love.graphics.getHeight()
 
     love.graphics.clear(0.05, 0.07, 0.05)
 
     local bar_w = 400
     local bar_h = 20
-    local bar_x = (sw - bar_w) / 2
-    local bar_y = sh / 2
+    local bar_x = (screen_width  - bar_w) / 2
+    local bar_y = screen_height / 2
 
     love.graphics.setColor(0.15, 0.18, 0.15)
     love.graphics.rectangle("fill", bar_x, bar_y, bar_w, bar_h, 3, 3)

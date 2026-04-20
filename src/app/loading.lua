@@ -130,16 +130,17 @@ function validateBuildingConfig()
 end
 
 function validateTileMap(building_type, cfg)
-    if not cfg.tile_map or #cfg.tile_map == 0 then
+    if cfg.tile_map == nil or #cfg.tile_map == 0 then
         return
     end
 
-    local w, h = cfg.width, cfg.height
-    assert(w and h,
+    local width  = cfg.width
+    local height = cfg.height
+    assert(width and height,
         "BuildingConfig." .. building_type .. ": has tile_map but missing width or height")
-    assert(#cfg.tile_map == w * h,
+    assert(#cfg.tile_map == width * height,
         "BuildingConfig." .. building_type .. ": tile_map length " .. #cfg.tile_map
-        .. " does not match width*height=" .. (w * h))
+        .. " does not match width*height=" .. (width * height))
 
     local d_count = 0
     for _, symbol in ipairs(cfg.tile_map) do
@@ -169,7 +170,7 @@ function validateTileMap(building_type, cfg)
             if type(positions) == "table" then
                 for _, pos in ipairs(positions) do
                     if type(pos) == "table" and pos.x ~= nil and pos.y ~= nil then
-                        local symbol = getTile(cfg.tile_map, w, pos.x, pos.y)
+                        local symbol = getTile(cfg.tile_map, width, pos.x, pos.y)
                         assert(symbol == "I" or symbol == "D",
                             "BuildingConfig." .. building_type .. ": layout." .. field
                             .. " position (" .. pos.x .. "," .. pos.y .. ") is on '"
@@ -180,62 +181,69 @@ function validateTileMap(building_type, cfg)
         end
     end
 
-    local reachable = reachableFromDoor(cfg.tile_map, w, h)
+    local reachable = reachableFromDoor(cfg.tile_map, width, height)
     for i, symbol in ipairs(cfg.tile_map) do
         if symbol == "I" or symbol == "D" then
-            local x = (i - 1) % w
-            local y = math.floor((i - 1) / w)
-            assert(reachable[y * w + x],
+            local tile_x = (i - 1) % width
+            local tile_y = math.floor((i - 1) / width)
+            assert(reachable[tile_y * width + tile_x],
                 "BuildingConfig." .. building_type .. ": tile '" .. symbol
-                .. "' at (" .. x .. "," .. y .. ") is not reachable from the D tile")
+                .. "' at (" .. tile_x .. "," .. tile_y .. ") is not reachable from the D tile")
         end
     end
 
     -- D must be on the perimeter (skip for placement-constrained buildings — see WORLD.md)
-    if not cfg.placement then
+    if cfg.placement == nil then
         for i, symbol in ipairs(cfg.tile_map) do
             if symbol == "D" then
-                local x = (i - 1) % w
-                local y = math.floor((i - 1) / w)
-                local is_perimeter = (x == 0 or x == w - 1 or y == 0 or y == h - 1)
+                local tile_x = (i - 1) % width
+                local tile_y = math.floor((i - 1) / width)
+                local is_perimeter = (tile_x == 0 or tile_x == width - 1 or tile_y == 0 or tile_y == height - 1)
                 assert(is_perimeter,
                     "BuildingConfig." .. building_type
-                    .. ": D tile at (" .. x .. "," .. y .. ") must be on the perimeter")
+                    .. ": D tile at (" .. tile_x .. "," .. tile_y .. ") must be on the perimeter")
             end
         end
     end
 end
 
 function reachableFromDoor(tile_map, width, height)
-    local d_x, d_y = nil, nil
+    local door_x, door_y = nil, nil
     for i, symbol in ipairs(tile_map) do
         if symbol == "D" then
-            d_x = (i - 1) % width
-            d_y = math.floor((i - 1) / width)
+            door_x = (i - 1) % width
+            door_y = math.floor((i - 1) / width)
             break
         end
     end
-    if d_x == nil then
+    if door_x == nil then
         return {}
     end
 
-    local visited = {}
-    local queue   = { { d_x, d_y } }
-    visited[d_y * width + d_x] = true
-    local qi = 1
-    while qi <= #queue do
-        local cx, cy = queue[qi][1], queue[qi][2]
-        qi = qi + 1
-        local neighbors = { { cx - 1, cy }, { cx + 1, cy }, { cx, cy - 1 }, { cx, cy + 1 } }
-        for _, nb in ipairs(neighbors) do
-            local nx, ny = nb[1], nb[2]
-            if nx >= 0 and nx < width and ny >= 0 and ny < height then
-                local key = ny * width + nx
-                if not visited[key] then
-                    local nsymbol = getTile(tile_map, width, nx, ny)
-                    if nsymbol == "I" or nsymbol == "D" then
+    local visited  = {}
+    local queue    = { { door_x, door_y } }
+    visited[door_y * width + door_x] = true
+    local queue_head = 1
+    while queue_head <= #queue do
+        local current_x = queue[queue_head][1]
+        local current_y = queue[queue_head][2]
+        queue_head = queue_head + 1
+        local neighbor_entries = {
+            { current_x - 1, current_y },
+            { current_x + 1, current_y },
+            { current_x, current_y - 1 },
+            { current_x, current_y + 1 },
+        }
+        for _, neighbor_entry in ipairs(neighbor_entries) do
+            local neighbor_x = neighbor_entry[1]
+            local neighbor_y = neighbor_entry[2]
+            if neighbor_x >= 0 and neighbor_x < width and neighbor_y >= 0 and neighbor_y < height then
+                local key = neighbor_y * width + neighbor_x
+                if visited[key] == nil then
+                    local neighbor_symbol = getTile(tile_map, width, neighbor_x, neighbor_y)
+                    if neighbor_symbol == "I" or neighbor_symbol == "D" then
                         visited[key] = true
-                        queue[#queue + 1] = { nx, ny }
+                        queue[#queue + 1] = { neighbor_x, neighbor_y }
                     end
                 end
             end

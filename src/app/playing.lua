@@ -75,15 +75,15 @@ function playing.keypressed(key)
         dev_overlay.toggle()
     elseif key == "f2" then
         for i = 1, #world.buildings do
-            local b = world.buildings[i]
-            if b.type == "stockpile" then
+            local building = world.buildings[i]
+            if building.type == "stockpile" then
                 local amount = math.floor(CARRY_WEIGHT_MAX / ResourceConfig["wood"].weight)
-                if resources.getAvailableCapacity(b.storage, "wood") >= ResourceConfig["wood"].weight * amount then
+                if resources.getAvailableCapacity(building.storage, "wood") >= ResourceConfig["wood"].weight * amount then
                     local id = resources.create("wood", amount)
-                    resources.deposit(b.storage, id)
-                    log:info("WORLD", "Debug: deposited %d wood into stockpile %d", amount, b.id)
+                    resources.deposit(building.storage, id)
+                    log:info("WORLD", "Debug: deposited %d wood into stockpile %d", amount, building.id)
                 else
-                    log:info("WORLD", "Debug: stockpile %d is full", b.id)
+                    log:info("WORLD", "Debug: stockpile %d is full", building.id)
                 end
                 break
             end

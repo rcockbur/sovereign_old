@@ -6,10 +6,10 @@ local registry = require("core.registry")
 
 local left_panel = {}
 
-local PANEL_W   = 280
-local PANEL_PAD = 8
-local MAX_ARRAY = 8
-local MAX_DEPTH = 5
+local PANEL_WIDTH = 280
+local PANEL_PAD   = 8
+local MAX_ARRAY   = 8
+local MAX_DEPTH   = 5
 
 local COL_BG      = { 0.08, 0.09, 0.10, 0.94 }
 local COL_BORDER  = { 0.25, 0.27, 0.28, 1.00 }
@@ -19,71 +19,71 @@ local COL_SECTION = { 0.55, 0.65, 0.75, 1.00 }
 
 -- ─── Generic recursive dump (tiles, buildings) ────────────────────────────────
 
-local function buildLines(val, depth, lines, indent)
+local function buildLines(value, depth, lines, indent)
     if depth > MAX_DEPTH then
         lines[#lines + 1] = { text = indent .. "...", color = COL_TEXT }
         return
     end
 
-    if type(val) ~= "table" then
-        lines[#lines + 1] = { text = indent .. tostring(val), color = COL_TEXT }
+    if type(value) ~= "table" then
+        lines[#lines + 1] = { text = indent .. tostring(value), color = COL_TEXT }
         return
     end
 
     local str_keys = {}
-    for k in pairs(val) do
-        if type(k) == "string" then str_keys[#str_keys + 1] = k end
+    for key in pairs(value) do
+        if type(key) == "string" then str_keys[#str_keys + 1] = key end
     end
     table.sort(str_keys)
     local str_limit = math.min(#str_keys, MAX_ARRAY)
     for i = 1, str_limit do
-        local k = str_keys[i]
-        local v = val[k]
-        if type(v) == "table" then
-            lines[#lines + 1] = { text = indent .. k .. ":", color = COL_TEXT }
-            buildLines(v, depth + 1, lines, indent .. "  ")
+        local key = str_keys[i]
+        local val = value[key]
+        if type(val) == "table" then
+            lines[#lines + 1] = { text = indent .. key .. ":", color = COL_TEXT }
+            buildLines(val, depth + 1, lines, indent .. "  ")
         else
-            lines[#lines + 1] = { text = indent .. k .. ": " .. tostring(v), color = COL_TEXT }
+            lines[#lines + 1] = { text = indent .. key .. ": " .. tostring(val), color = COL_TEXT }
         end
     end
     if #str_keys > MAX_ARRAY then
         lines[#lines + 1] = { text = indent .. "(" .. (#str_keys - MAX_ARRAY) .. " more keys)", color = COL_TEXT }
     end
 
-    local n = #val
-    if n > 0 then
-        local limit = math.min(n, MAX_ARRAY)
+    local array_count = #value
+    if array_count > 0 then
+        local limit = math.min(array_count, MAX_ARRAY)
         for i = 1, limit do
-            local v = val[i]
-            if type(v) == "table" then
+            local val = value[i]
+            if type(val) == "table" then
                 lines[#lines + 1] = { text = indent .. "[" .. i .. "]:", color = COL_TEXT }
-                buildLines(v, depth + 1, lines, indent .. "  ")
+                buildLines(val, depth + 1, lines, indent .. "  ")
             else
-                lines[#lines + 1] = { text = indent .. "[" .. i .. "]: " .. tostring(v), color = COL_TEXT }
+                lines[#lines + 1] = { text = indent .. "[" .. i .. "]: " .. tostring(val), color = COL_TEXT }
             end
         end
-        if n > MAX_ARRAY then
-            lines[#lines + 1] = { text = indent .. "(" .. (n - MAX_ARRAY) .. " more)", color = COL_TEXT }
+        if array_count > MAX_ARRAY then
+            lines[#lines + 1] = { text = indent .. "(" .. (array_count - MAX_ARRAY) .. " more)", color = COL_TEXT }
         end
     end
 
     local int_keys = {}
-    for k in pairs(val) do
-        if type(k) == "number" and (k < 1 or k > n or k ~= math.floor(k)) then
-            int_keys[#int_keys + 1] = k
+    for key in pairs(value) do
+        if type(key) == "number" and (key < 1 or key > array_count or key ~= math.floor(key)) then
+            int_keys[#int_keys + 1] = key
         end
     end
     if #int_keys > 0 then
         table.sort(int_keys)
         local limit = math.min(#int_keys, MAX_ARRAY)
         for i = 1, limit do
-            local k = int_keys[i]
-            local v = val[k]
-            if type(v) == "table" then
-                lines[#lines + 1] = { text = indent .. "[" .. k .. "]:", color = COL_TEXT }
-                buildLines(v, depth + 1, lines, indent .. "  ")
+            local key = int_keys[i]
+            local val = value[key]
+            if type(val) == "table" then
+                lines[#lines + 1] = { text = indent .. "[" .. key .. "]:", color = COL_TEXT }
+                buildLines(val, depth + 1, lines, indent .. "  ")
             else
-                lines[#lines + 1] = { text = indent .. "[" .. k .. "]: " .. tostring(v), color = COL_TEXT }
+                lines[#lines + 1] = { text = indent .. "[" .. key .. "]: " .. tostring(val), color = COL_TEXT }
             end
         end
         if #int_keys > MAX_ARRAY then
@@ -112,8 +112,8 @@ local function displayUnitInfo(unit, lines)
     sec(lines, "position")
     row(lines, "  x: " .. unit.x .. "  y: " .. unit.y)
     if unit.target_tile ~= nil then
-        local tx, ty = tileXY(unit.target_tile)
-        row(lines, "  target: " .. tx .. ", " .. ty)
+        local tile_x, tile_y = tileXY(unit.target_tile)
+        row(lines, "  target: " .. tile_x .. ", " .. tile_y)
     end
     row(lines, "")
 
@@ -163,7 +163,7 @@ local function displayUnitInfo(unit, lines)
     sec(lines, "vitals")
     row(lines, "  health: " .. math.floor(unit.health)
         .. "  mood: " .. math.floor(unit.mood))
-    if unit.soft_interrupt_pending then
+    if unit.soft_interrupt_pending == true then
         row(lines, "  soft interrupt pending")
     end
     row(lines, "")
@@ -188,10 +188,10 @@ local function displayUnitInfo(unit, lines)
 
     -- Work day
     sec(lines, "work day")
-    local rem  = unit.work_ticks_remaining
-    local wh   = math.floor(rem / TICKS_PER_HOUR)
-    local wm   = math.floor((rem % TICKS_PER_HOUR) / TICKS_PER_MINUTE)
-    row(lines, "  remaining: " .. wh .. "h " .. wm .. "m")
+    local ticks_remaining = unit.work_ticks_remaining
+    local work_hours      = math.floor(ticks_remaining / TICKS_PER_HOUR)
+    local work_minutes    = math.floor((ticks_remaining % TICKS_PER_HOUR) / TICKS_PER_MINUTE)
+    row(lines, "  remaining: " .. work_hours .. "h " .. work_minutes .. "m")
     row(lines, "  done: " .. tostring(unit.is_done_working))
     row(lines, "")
 
@@ -257,11 +257,13 @@ end
 -- ─── Draw ─────────────────────────────────────────────────────────────────────
 
 function left_panel.draw(selected, selected_type)
-    if selected == nil then return end
+    if selected == nil then
+        return
+    end
 
-    local sh     = love.graphics.getHeight()
-    local fh     = love.graphics.getFont():getHeight()
-    local line_h = fh + 2
+    local screen_height = love.graphics.getHeight()
+    local font_height   = love.graphics.getFont():getHeight()
+    local line_height   = font_height + 2
 
     local lines = {}
     if selected_type == "unit" then
@@ -275,23 +277,23 @@ function left_panel.draw(selected, selected_type)
     end
 
     love.graphics.setColor(COL_BG)
-    love.graphics.rectangle("fill", 0, 0, PANEL_W, sh)
+    love.graphics.rectangle("fill", 0, 0, PANEL_WIDTH, screen_height)
     love.graphics.setColor(COL_BORDER)
-    love.graphics.line(PANEL_W, 0, PANEL_W, sh)
+    love.graphics.line(PANEL_WIDTH, 0, PANEL_WIDTH, screen_height)
 
     love.graphics.setColor(COL_HEADER)
     love.graphics.print("[" .. selected_type .. "]", PANEL_PAD, PANEL_PAD)
 
-    local y_off     = PANEL_PAD + line_h + 4
-    local max_lines = math.floor((sh - y_off - PANEL_PAD) / line_h)
+    local y_offset  = PANEL_PAD + line_height + 4
+    local max_lines = math.floor((screen_height - y_offset - PANEL_PAD) / line_height)
 
     for i = 1, math.min(#lines, max_lines) do
         local entry = lines[i]
         love.graphics.setColor(entry.color)
-        love.graphics.print(entry.text, PANEL_PAD, y_off + (i - 1) * line_h)
+        love.graphics.print(entry.text, PANEL_PAD, y_offset + (i - 1) * line_height)
     end
 end
 
-left_panel.width = PANEL_W
+left_panel.width = PANEL_WIDTH
 
 return left_panel

@@ -111,13 +111,15 @@ local function getActivityPosition(activity)
 end
 
 local function scoreActivity(unit, activity)
-    local ax, ay = getActivityPosition(activity)
-    local dist = math.abs(unit.x - ax) + math.abs(unit.y - ay)
+    local activity_x, activity_y = getActivityPosition(activity)
+    local dist = math.abs(unit.x - activity_x) + math.abs(unit.y - activity_y)
     return ActivityConfig.age_weight * (world.time.tick - activity.posted_tick) - dist
 end
 
 local function canClaim(unit, activity)
-    if activity.worker_id ~= nil then return false end
+    if activity.worker_id ~= nil then
+        return false
+    end
     if activity.type == "haul" then
         if activity.source_id ~= nil
                 and resources.findNearestStorage(unit, activity.resource_type, 1) == nil then
@@ -126,7 +128,9 @@ local function canClaim(unit, activity)
         return unit.class == "serf"
     end
     local type_cfg = ActivityTypeConfig[activity.type]
-    if type_cfg == nil then return false end
+    if type_cfg == nil then
+        return false
+    end
     if unit.class == "serf" then
         return type_cfg.is_specialty == false
     elseif unit.class == "freeman" then
@@ -161,7 +165,9 @@ end
 
 function activities.cancelDesignation(tile_idx)
     local tile = world.tiles[tile_idx]
-    if tile.designation == nil then return end
+    if tile.designation == nil then
+        return
+    end
     local act_id = tile.designation_activity_id
     tile.designation             = nil
     tile.designation_activity_id = nil
@@ -588,8 +594,8 @@ ActivityHandlers["haul"] = {
             end
 
         elseif phase == "travel_pickup" then
-            local gp   = registry[activity.source_id]
-            local dest = registry[activity.destination_id]
+            local gp    = registry[activity.source_id]
+            local dest  = registry[activity.destination_id]
             local rtype = activity.resource_type
 
             if gp == nil then
@@ -638,8 +644,12 @@ ActivityHandlers["haul"] = {
             end
             local remaining = resources.getStock(gp, rtype)
             activities.removeActivity(activity.id)
-            if remaining > 0 then activities.postGroundPileHaulIfNeeded(gp, rtype) end
-            if #gp.contents == 0 then resources.destroyGroundPile(gp) end
+            if remaining > 0 then
+                activities.postGroundPileHaulIfNeeded(gp, rtype)
+            end
+            if #gp.contents == 0 then
+                resources.destroyGroundPile(gp)
+            end
             unit.current_action = { type = "idle" }
 
         elseif phase == "travel_deposit" then
@@ -668,7 +678,9 @@ ActivityHandlers["haul"] = {
                 if resources.getStock(gp, rtype) > 0 then
                     activities.postGroundPileHaulIfNeeded(gp, rtype)
                 end
-                if #gp.contents == 0 then resources.destroyGroundPile(gp) end
+                if #gp.contents == 0 then
+                    resources.destroyGroundPile(gp)
+                end
             end
             unit.current_action = { type = "idle" }
         end

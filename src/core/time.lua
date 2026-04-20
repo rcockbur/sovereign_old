@@ -52,9 +52,9 @@ function time.advance()
     time.ticks_this_second = time.ticks_this_second + 1
     updateCalendar()
     if world.time.game_hour ~= prev_hour then
-        local wt = world.time
+        local world_time = world.time
         log:info("TIME", "Year %d  Season %d  Day %d  Hour %d",
-            wt.game_year, wt.game_season, wt.game_day, wt.game_hour)
+            world_time.game_year, world_time.game_season, world_time.game_day, world_time.game_hour)
     end
 end
 
@@ -86,16 +86,16 @@ function time.getEnergyThresholds()
 end
 
 function updateCalendar()
-    local wt            = world.time
-    local total_minutes = math.floor(wt.tick / TICKS_PER_MINUTE)
-    wt.game_minute      = total_minutes % MINUTES_PER_HOUR
+    local world_time    = world.time
+    local total_minutes = math.floor(world_time.tick / TICKS_PER_MINUTE)
+    world_time.game_minute      = total_minutes % MINUTES_PER_HOUR
     local total_hours   = math.floor(total_minutes / MINUTES_PER_HOUR)
-    wt.game_hour        = total_hours % HOURS_PER_DAY
+    world_time.game_hour        = total_hours % HOURS_PER_DAY
     local total_days    = math.floor(total_hours / HOURS_PER_DAY)
-    wt.game_day         = (total_days % DAYS_PER_SEASON) + 1
+    world_time.game_day         = (total_days % DAYS_PER_SEASON) + 1
     local total_seasons = math.floor(total_days / DAYS_PER_SEASON)
-    wt.game_season      = (total_seasons % SEASONS_PER_YEAR) + 1
-    wt.game_year        = math.floor(total_seasons / SEASONS_PER_YEAR) + 1
+    world_time.game_season      = (total_seasons % SEASONS_PER_YEAR) + 1
+    world_time.game_year        = math.floor(total_seasons / SEASONS_PER_YEAR) + 1
 end
 
 return time

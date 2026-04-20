@@ -8,26 +8,26 @@ local camera   = require("ui.camera")
 
 local renderer = {}
 
-local function unitScreenPos(unit, ts, half)
-    local px = (unit.x - 1) * ts + half
-    local py = (unit.y - 1) * ts + half
+local function unitScreenPos(unit, tile_size, half_tile)
+    local pixel_x = (unit.x - 1) * tile_size + half_tile
+    local pixel_y = (unit.y - 1) * tile_size + half_tile
     if unit.path ~= nil then
         local next_idx  = unit.path.tiles[unit.path.current]
-        local nx, ny    = tileXY(next_idx)
+        local next_x, next_y = tileXY(next_idx)
         local from_idx  = tileIndex(unit.x, unit.y)
         local tile_cost = world.getEdgeCost(from_idx, next_idx)
         if tile_cost ~= nil then
-            local dx = math.abs(nx - unit.x)
-            local dy = math.abs(ny - unit.y)
+            local dx = math.abs(next_x - unit.x)
+            local dy = math.abs(next_y - unit.y)
             if dx == 1 and dy == 1 then
                 tile_cost = tile_cost * SQRT2
             end
             local lerp_t = math.min(unit.move_progress / tile_cost, 1.0)
-            px = px + (nx - unit.x) * ts * lerp_t
-            py = py + (ny - unit.y) * ts * lerp_t
+            pixel_x = pixel_x + (next_x - unit.x) * tile_size * lerp_t
+            pixel_y = pixel_y + (next_y - unit.y) * tile_size * lerp_t
         end
     end
-    return px, py
+    return pixel_x, pixel_y
 end
 
 local COLOR_GRASS     = { 0.35, 0.55, 0.25 }
@@ -39,8 +39,8 @@ local COLOR_UNIT      = { 0.90, 0.75, 0.20 }
 local COLOR_STOCKPILE = { 0.65, 0.55, 0.35 }
 
 -- Plant radii by growth stage (fraction of half-tile)
-local TREE_RADIUS   = { 0.25, 0.50, 0.75 }
-local BUSH_RADIUS   = { 0.25, 0.50, 0.75 }
+local TREE_RADIUS = { 0.25, 0.50, 0.75 }
+local BUSH_RADIUS = { 0.25, 0.50, 0.75 }
 
 local RESOURCE_COLOR = {
     -- Raw construction
@@ -68,26 +68,26 @@ local RESOURCE_COLOR = {
 }
 
 function renderer.drawWorld()
-    local sw, sh = love.graphics.getDimensions()
-    local z      = camera.zoom
-    local left   = camera.x - sw / (2 * z)
-    local right  = camera.x + sw / (2 * z)
-    local top    = camera.y - sh / (2 * z)
-    local bottom = camera.y + sh / (2 * z)
+    local screen_width, screen_height = love.graphics.getDimensions()
+    local zoom   = camera.zoom
+    local left   = camera.x - screen_width  / (2 * zoom)
+    local right  = camera.x + screen_width  / (2 * zoom)
+    local top    = camera.y - screen_height / (2 * zoom)
+    local bottom = camera.y + screen_height / (2 * zoom)
 
     local x_min = math.max(1,          math.floor(left   / TILE_SIZE) + 1)
     local x_max = math.min(MAP_WIDTH,  math.ceil( right  / TILE_SIZE))
     local y_min = math.max(1,          math.floor(top    / TILE_SIZE) + 1)
     local y_max = math.min(MAP_HEIGHT, math.ceil( bottom / TILE_SIZE))
 
-    local ts   = TILE_SIZE
-    local half = ts * 0.5
+    local tile_size = TILE_SIZE
+    local half_tile = tile_size * 0.5
 
     for x = x_min, x_max do
         for y = y_min, y_max do
-            local tile = world.tiles[tileIndex(x, y)]
-            local px   = (x - 1) * ts
-            local py   = (y - 1) * ts
+            local tile    = world.tiles[tileIndex(x, y)]
+            local pixel_x = (x - 1) * tile_size
+            local pixel_y = (y - 1) * tile_size
 
             if tile.terrain == "water" then
                 love.graphics.setColor(COLOR_WATER)
@@ -96,47 +96,47 @@ function renderer.drawWorld()
             else
                 love.graphics.setColor(COLOR_GRASS)
             end
-            love.graphics.rectangle("fill", px, py, ts, ts)
+            love.graphics.rectangle("fill", pixel_x, pixel_y, tile_size, tile_size)
 
             if tile.plant_type == "tree" and tile.plant_growth >= 1 then
                 love.graphics.setColor(COLOR_TREE)
-                love.graphics.circle("fill", px + half, py + half, half * TREE_RADIUS[tile.plant_growth])
+                love.graphics.circle("fill", pixel_x + half_tile, pixel_y + half_tile, half_tile * TREE_RADIUS[tile.plant_growth])
             elseif tile.plant_type == "berry_bush" and tile.plant_growth >= 1 then
                 love.graphics.setColor(COLOR_BERRY)
-                love.graphics.circle("fill", px + half, py + half, half * BUSH_RADIUS[tile.plant_growth])
+                love.graphics.circle("fill", pixel_x + half_tile, pixel_y + half_tile, half_tile * BUSH_RADIUS[tile.plant_growth])
             end
         end
     end
 end
 
 function renderer.drawUnits()
-    local ts   = TILE_SIZE
-    local half = ts * 0.5
-    local r    = half * 0.4
+    local tile_size = TILE_SIZE
+    local half_tile = tile_size * 0.5
+    local radius    = half_tile * 0.4
 
     for i = 1, #world.units do
         local unit = world.units[i]
         if unit.is_dead == false then
-            local px, py = unitScreenPos(unit, ts, half)
+            local pixel_x, pixel_y = unitScreenPos(unit, tile_size, half_tile)
             love.graphics.setColor(COLOR_UNIT)
-            love.graphics.circle("fill", px, py, r)
+            love.graphics.circle("fill", pixel_x, pixel_y, radius)
         end
     end
 end
 
 function renderer.drawBuildings()
-    local sw, sh = love.graphics.getDimensions()
-    local z      = camera.zoom
-    local left   = camera.x - sw / (2 * z)
-    local right  = camera.x + sw / (2 * z)
-    local top    = camera.y - sh / (2 * z)
-    local bottom = camera.y + sh / (2 * z)
-    local vx_min = math.floor(left   / TILE_SIZE) + 1
-    local vx_max = math.ceil( right  / TILE_SIZE)
-    local vy_min = math.floor(top    / TILE_SIZE) + 1
-    local vy_max = math.ceil( bottom / TILE_SIZE)
+    local screen_width, screen_height = love.graphics.getDimensions()
+    local zoom    = camera.zoom
+    local left    = camera.x - screen_width  / (2 * zoom)
+    local right   = camera.x + screen_width  / (2 * zoom)
+    local top     = camera.y - screen_height / (2 * zoom)
+    local bottom  = camera.y + screen_height / (2 * zoom)
+    local vx_min  = math.floor(left   / TILE_SIZE) + 1
+    local vx_max  = math.ceil( right  / TILE_SIZE)
+    local vy_min  = math.floor(top    / TILE_SIZE) + 1
+    local vy_max  = math.ceil( bottom / TILE_SIZE)
 
-    local ts = TILE_SIZE
+    local tile_size = TILE_SIZE
     for i = 1, #world.buildings do
         local building = world.buildings[i]
         if building.type == "stockpile" then
@@ -147,10 +147,10 @@ function renderer.drawBuildings()
             if x_min <= x_max and y_min <= y_max then
                 for x = x_min, x_max do
                     for y = y_min, y_max do
-                        local px = (x - 1) * ts
-                        local py = (y - 1) * ts
+                        local pixel_x = (x - 1) * tile_size
+                        local pixel_y = (y - 1) * tile_size
                         love.graphics.setColor(COLOR_STOCKPILE)
-                        love.graphics.rectangle("fill", px, py, ts, ts)
+                        love.graphics.rectangle("fill", pixel_x, pixel_y, tile_size, tile_size)
 
                         local col        = x - building.x
                         local row        = y - building.y
@@ -166,10 +166,10 @@ function renderer.drawBuildings()
 
                         if used > 0 then
                             local pad = used >= building.storage.tile_capacity
-                                and math.floor(ts * 0.09)
-                                or  math.floor(ts * 0.34)
+                                and math.floor(tile_size * 0.09)
+                                or  math.floor(tile_size * 0.34)
                             love.graphics.setColor(RESOURCE_COLOR[rtype])
-                            love.graphics.rectangle("fill", px + pad, py + pad, ts - pad * 2, ts - pad * 2)
+                            love.graphics.rectangle("fill", pixel_x + pad, pixel_y + pad, tile_size - pad * 2, tile_size - pad * 2)
                         end
                     end
                 end
@@ -183,32 +183,32 @@ local COLOR_DESIG_CHOP   = { 0.95, 0.65, 0.10, 0.55 }
 local COLOR_DESIG_GATHER = { 0.55, 0.25, 0.65, 0.55 }
 
 function renderer.drawGroundPiles()
-    local ts  = TILE_SIZE
-    local pad = math.floor(ts * 0.25)
-    local sz  = ts - pad * 2
+    local tile_size = TILE_SIZE
+    local pad       = math.floor(tile_size * 0.25)
+    local sz        = tile_size - pad * 2
     for i = 1, #world.ground_piles do
         local gp = world.ground_piles[i]
         love.graphics.setColor(COLOR_GROUND_PILE)
-        love.graphics.rectangle("fill", (gp.x - 1) * ts + pad, (gp.y - 1) * ts + pad, sz, sz)
+        love.graphics.rectangle("fill", (gp.x - 1) * tile_size + pad, (gp.y - 1) * tile_size + pad, sz, sz)
     end
 end
 
 function renderer.drawDesignations()
-    local sw, sh = love.graphics.getDimensions()
-    local z      = camera.zoom
-    local left   = camera.x - sw / (2 * z)
-    local right  = camera.x + sw / (2 * z)
-    local top    = camera.y - sh / (2 * z)
-    local bottom = camera.y + sh / (2 * z)
+    local screen_width, screen_height = love.graphics.getDimensions()
+    local zoom   = camera.zoom
+    local left   = camera.x - screen_width  / (2 * zoom)
+    local right  = camera.x + screen_width  / (2 * zoom)
+    local top    = camera.y - screen_height / (2 * zoom)
+    local bottom = camera.y + screen_height / (2 * zoom)
 
     local x_min = math.max(1,          math.floor(left   / TILE_SIZE) + 1)
     local x_max = math.min(MAP_WIDTH,  math.ceil( right  / TILE_SIZE))
     local y_min = math.max(1,          math.floor(top    / TILE_SIZE) + 1)
     local y_max = math.min(MAP_HEIGHT, math.ceil( bottom / TILE_SIZE))
 
-    local ts   = TILE_SIZE
-    local pad  = math.floor(ts * 0.2)
-    local size = ts - pad * 2
+    local tile_size = TILE_SIZE
+    local pad       = math.floor(tile_size * 0.2)
+    local size      = tile_size - pad * 2
 
     for x = x_min, x_max do
         for y = y_min, y_max do
@@ -216,11 +216,11 @@ function renderer.drawDesignations()
             if tile.designation == "chop" then
                 love.graphics.setColor(COLOR_DESIG_CHOP)
                 love.graphics.rectangle("fill",
-                    (x - 1) * ts + pad, (y - 1) * ts + pad, size, size)
+                    (x - 1) * tile_size + pad, (y - 1) * tile_size + pad, size, size)
             elseif tile.designation == "gather" then
                 love.graphics.setColor(COLOR_DESIG_GATHER)
                 love.graphics.rectangle("fill",
-                    (x - 1) * ts + pad, (y - 1) * ts + pad, size, size)
+                    (x - 1) * tile_size + pad, (y - 1) * tile_size + pad, size, size)
             end
         end
     end
@@ -233,21 +233,21 @@ function renderer.drawSelection(selected, selected_type, tile_idx)
     love.graphics.setColor(1, 1, 1, 0.7)
 
     if selected_type == "unit" then
-        local ts     = TILE_SIZE
-        local half   = ts * 0.5
-        local r      = half * 0.4
-        local px, py = unitScreenPos(selected, ts, half)
-        love.graphics.circle("line", px, py, r + 3)
+        local tile_size = TILE_SIZE
+        local half_tile = tile_size * 0.5
+        local radius    = half_tile * 0.4
+        local pixel_x, pixel_y = unitScreenPos(selected, tile_size, half_tile)
+        love.graphics.circle("line", pixel_x, pixel_y, radius + 3)
     elseif selected_type == "building" then
-        local ts = TILE_SIZE
+        local tile_size = TILE_SIZE
         love.graphics.rectangle("line",
-            (selected.x - 1) * ts, (selected.y - 1) * ts,
-            selected.width * ts, selected.height * ts)
+            (selected.x - 1) * tile_size, (selected.y - 1) * tile_size,
+            selected.width * tile_size, selected.height * tile_size)
     else
-        local x, y = tileXY(tile_idx)
-        local px   = (x - 1) * TILE_SIZE
-        local py   = (y - 1) * TILE_SIZE
-        love.graphics.rectangle("line", px, py, TILE_SIZE, TILE_SIZE)
+        local x, y     = tileXY(tile_idx)
+        local pixel_x  = (x - 1) * TILE_SIZE
+        local pixel_y  = (y - 1) * TILE_SIZE
+        love.graphics.rectangle("line", pixel_x, pixel_y, TILE_SIZE, TILE_SIZE)
     end
 end
 

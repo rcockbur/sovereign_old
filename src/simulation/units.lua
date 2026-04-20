@@ -82,11 +82,11 @@ function units.spawnSerf(x, y)
 end
 
 function units.spawnStarting()
-    local half    = math.floor(GEN_START_SIZE / 2)
-    local x_start = GEN_START_X - half + 1
-    local x_end   = GEN_START_X + half
-    local y_start = GEN_START_Y - half + 1
-    local y_end   = GEN_START_Y + half
+    local half_size = math.floor(GEN_START_SIZE / 2)
+    local x_start   = GEN_START_X - half_size + 1
+    local x_end     = GEN_START_X + half_size
+    local y_start   = GEN_START_Y - half_size + 1
+    local y_end     = GEN_START_Y + half_size
 
     local count = 0
     for x = x_start, x_end do
@@ -118,7 +118,7 @@ function Unit:moveStep()
     end
 
     local next_idx  = self.path.tiles[self.path.current]
-    local nx, ny    = tileXY(next_idx)
+    local next_x, next_y = tileXY(next_idx)
     local next_tile = world.tiles[next_idx]
     local from_idx  = tileIndex(self.x, self.y)
     local cost      = world.getEdgeCost(from_idx, next_idx)
@@ -127,9 +127,11 @@ function Unit:moveStep()
         return
     end
 
-    local dx = math.abs(nx - self.x)
-    local dy = math.abs(ny - self.y)
-    if dx == 1 and dy == 1 then cost = cost * SQRT2 end
+    local delta_x = math.abs(next_x - self.x)
+    local delta_y = math.abs(next_y - self.y)
+    if delta_x == 1 and delta_y == 1 then
+        cost = cost * SQRT2
+    end
 
     self.move_progress = self.move_progress + self.move_speed
     if self.move_progress >= cost then
@@ -144,8 +146,8 @@ function Unit:moveStep()
             end
         end
         next_tile.unit_ids[#next_tile.unit_ids + 1] = self.id
-        self.x = nx
-        self.y = ny
+        self.x = next_x
+        self.y = next_y
 
         self.path.current = self.path.current + 1
         if self.path.current > #self.path.tiles then
@@ -283,7 +285,9 @@ end
 
 function units.startMove(unit, goal_idx)
     local goal_tile = world.tiles[goal_idx]
-    if goal_tile.target_of_unit ~= nil then return false end
+    if goal_tile.target_of_unit ~= nil then
+        return false
+    end
 
     local old_target_idx = unit.target_tile
 
@@ -336,22 +340,24 @@ function units.floodFillNearest(unit)
     local visited   = { [start_idx] = true }
 
     while head <= #queue do
-        local cur = queue[head]; head = head + 1
-        local cx, cy = tileXY(cur)
+        local current_tile = queue[head]
+        head = head + 1
+        local current_x, current_y = tileXY(current_tile)
 
-        if world.tiles[cur].target_of_unit == nil and cur ~= start_idx then
-            world.tiles[cur].target_of_unit = unit.id
-            unit.target_tile                = cur
-            return cur
+        if world.tiles[current_tile].target_of_unit == nil and current_tile ~= start_idx then
+            world.tiles[current_tile].target_of_unit = unit.id
+            unit.target_tile                         = current_tile
+            return current_tile
         end
 
-        for _, d in ipairs(FLOOD_DIRS) do
-            local nx, ny = cx + d[1], cy + d[2]
-            if nx >= 1 and nx <= MAP_WIDTH and ny >= 1 and ny <= MAP_HEIGHT then
-                local nidx = tileIndex(nx, ny)
-                if visited[nidx] == nil and world.getEdgeCost(cur, nidx) ~= nil then
-                    visited[nidx]       = true
-                    queue[#queue + 1]   = nidx
+        for _, direction in ipairs(FLOOD_DIRS) do
+            local neighbor_x = current_x + direction[1]
+            local neighbor_y = current_y + direction[2]
+            if neighbor_x >= 1 and neighbor_x <= MAP_WIDTH and neighbor_y >= 1 and neighbor_y <= MAP_HEIGHT then
+                local neighbor_idx = tileIndex(neighbor_x, neighbor_y)
+                if visited[neighbor_idx] == nil and world.getEdgeCost(current_tile, neighbor_idx) ~= nil then
+                    visited[neighbor_idx]   = true
+                    queue[#queue + 1]       = neighbor_idx
                 end
             end
         end

@@ -84,12 +84,12 @@ function world.newGenCoroutine(seed)
     return coroutine.create(function()
         initState(seed)
 
-        local water_ox = math.random(0, 1000000)
-        local water_oy = math.random(0, 1000000)
-        local rock_ox  = math.random(0, 1000000)
-        local rock_oy  = math.random(0, 1000000)
-        local tree_ox  = math.random(0, 1000000)
-        local tree_oy  = math.random(0, 1000000)
+        local water_offset_x = math.random(0, 1000000)
+        local water_offset_y = math.random(0, 1000000)
+        local rock_offset_x  = math.random(0, 1000000)
+        local rock_offset_y  = math.random(0, 1000000)
+        local tree_offset_x  = math.random(0, 1000000)
+        local tree_offset_y  = math.random(0, 1000000)
 
         local STAGES = {
             tiles   = { p0 = 0.00, p1 = 0.35, msg = "Allocating Memory" },
@@ -111,9 +111,9 @@ function world.newGenCoroutine(seed)
             end
         end
 
-        layerWater(water_ox, water_oy, STAGES.water)
-        layerRock (rock_ox,  rock_oy,  STAGES.rock)
-        layerTrees(tree_ox,  tree_oy,  STAGES.trees)
+        layerWater(water_offset_x, water_offset_y, STAGES.water)
+        layerRock (rock_offset_x,  rock_offset_y,  STAGES.rock)
+        layerTrees(tree_offset_x,  tree_offset_y,  STAGES.trees)
 
         --coroutine.yield(STAGES.berries.p1)
         layerBerries(STAGES.berries)
@@ -154,8 +154,8 @@ layerWater = function(ox, oy, stage)
 end
 
 layerRock = function(ox, oy, stage)
-    local ts = GEN_ROCK_THRESHOLD_SETTLE
-    local tf = GEN_ROCK_THRESHOLD_FOREST
+    local threshold_settle = GEN_ROCK_THRESHOLD_SETTLE
+    local threshold_forest = GEN_ROCK_THRESHOLD_FOREST
     local band_start = GEN_TRANSITION_START
     local band_end   = GEN_TRANSITION_END
     local p_mid      = stage.p0 + (stage.p1 - stage.p0) * 0.5
@@ -166,12 +166,12 @@ layerRock = function(ox, oy, stage)
             if tile.terrain == "grass" then
                 local threshold
                 if x <= band_start then
-                    threshold = ts
+                    threshold = threshold_settle
                 elseif x >= band_end then
-                    threshold = tf
+                    threshold = threshold_forest
                 else
-                    local frac = (x - band_start) / (band_end - band_start)
-                    threshold = ts + frac * (tf - ts)
+                    local fraction = (x - band_start) / (band_end - band_start)
+                    threshold = threshold_settle + fraction * (threshold_forest - threshold_settle)
                 end
                 local n = love.math.noise((x + ox) * GEN_ROCK_FREQ, (y + oy) * GEN_ROCK_FREQ)
                 if n > threshold then
@@ -195,13 +195,14 @@ layerRock = function(ox, oy, stage)
                 local head    = 1
                 visited[idx]  = true
                 while head <= #queue do
-                    local cur    = queue[head]; head = head + 1
-                    cluster[#cluster + 1] = cur
-                    local cx, cy = tileXY(cur)
-                    for _, nidx in ipairs(orthogonalNeighbors(cx, cy)) do
-                        if visited[nidx] == nil and world.tiles[nidx].terrain == "rock" then
-                            visited[nidx]        = true
-                            queue[#queue + 1] = nidx
+                    local current_idx = queue[head]
+                    head = head + 1
+                    cluster[#cluster + 1] = current_idx
+                    local current_x, current_y = tileXY(current_idx)
+                    for _, neighbor_idx in ipairs(orthogonalNeighbors(current_x, current_y)) do
+                        if visited[neighbor_idx] == nil and world.tiles[neighbor_idx].terrain == "rock" then
+                            visited[neighbor_idx]    = true
+                            queue[#queue + 1] = neighbor_idx
                         end
                     end
                 end
@@ -219,8 +220,8 @@ layerRock = function(ox, oy, stage)
 end
 
 layerTrees = function(ox, oy, stage)
-    local ts         = GEN_TREE_THRESHOLD_SETTLE
-    local tf         = GEN_TREE_THRESHOLD_FOREST
+    local threshold_settle = GEN_TREE_THRESHOLD_SETTLE
+    local threshold_forest = GEN_TREE_THRESHOLD_FOREST
     local band_start = GEN_TRANSITION_START
     local band_end   = GEN_TRANSITION_END
 
@@ -230,12 +231,12 @@ layerTrees = function(ox, oy, stage)
             if tile.terrain == "grass" then
                 local threshold
                 if x <= band_start then
-                    threshold = ts
+                    threshold = threshold_settle
                 elseif x >= band_end then
-                    threshold = tf
+                    threshold = threshold_forest
                 else
-                    local frac = (x - band_start) / (band_end - band_start)
-                    threshold = ts + frac * (tf - ts)
+                    local fraction = (x - band_start) / (band_end - band_start)
+                    threshold = threshold_settle + fraction * (threshold_forest - threshold_settle)
                 end
                 local n = love.math.noise((x + ox) * GEN_TREE_FREQ, (y + oy) * GEN_TREE_FREQ)
                 if n > threshold then
@@ -281,9 +282,9 @@ end
 
 layerStartingArea = function(stage)
     coroutine.yield(stage.start)
-    local half = math.floor(GEN_START_SIZE / 2)
-    for x = GEN_START_X - half + 1, GEN_START_X + half do
-        for y = GEN_START_Y - half + 1, GEN_START_Y + half do
+    local half_size = math.floor(GEN_START_SIZE / 2)
+    for x = GEN_START_X - half_size + 1, GEN_START_X + half_size do
+        for y = GEN_START_Y - half_size + 1, GEN_START_Y + half_size do
             if x >= 1 and x <= MAP_WIDTH and y >= 1 and y <= MAP_HEIGHT then
                 local tile       = world.tiles[tileIndex(x, y)]
                 tile.terrain     = "grass"
@@ -302,17 +303,17 @@ logGenStats = function()
     for x = 1, MAP_WIDTH do
         for y = 1, MAP_HEIGHT do
             local tile = world.tiles[tileIndex(x, y)]
-            local half = x <= SETTLEMENT_COLUMNS and settle or forest
+            local area_stats = x <= SETTLEMENT_COLUMNS and settle or forest
             if tile.terrain == "water" then
-                half.water = half.water + 1
+                area_stats.water = area_stats.water + 1
             elseif tile.terrain == "rock" then
-                half.rock = half.rock + 1
+                area_stats.rock = area_stats.rock + 1
             elseif tile.plant_type == "tree" then
-                half.tree = half.tree + 1
+                area_stats.tree = area_stats.tree + 1
             elseif tile.plant_type == "berry_bush" then
-                half.berry = half.berry + 1
+                area_stats.berry = area_stats.berry + 1
             else
-                half.grass = half.grass + 1
+                area_stats.grass = area_stats.grass + 1
             end
         end
     end
@@ -358,8 +359,8 @@ function world.getEdgeCost(from_idx, to_idx, exempt_building_id)
 
     -- Phase check: non-complete building tiles are impassable unless exempt
     if to_tile.building_id ~= nil and to_tile.building_id ~= exempt_building_id then
-        local b = registry[to_tile.building_id]
-        if b ~= nil and b.phase ~= "complete" then
+        local building = registry[to_tile.building_id]
+        if building ~= nil and building.phase ~= "complete" then
             return nil
         end
     end
@@ -388,30 +389,27 @@ function world.getEdgeCost(from_idx, to_idx, exempt_building_id)
         return from_tile.building_id == to_tile.building_id
     end
 
-    local fr = from_role
-    local tr = to_role
-
     -- outdoor/clearing combinations always allowed
-    if (fr == "outdoor" or fr == "clearing") and (tr == "outdoor" or tr == "clearing") then
+    if (from_role == "outdoor" or from_role == "clearing") and (to_role == "outdoor" or to_role == "clearing") then
         return cost
     end
 
-    if fr == "indoor" and tr == "indoor" then
+    if from_role == "indoor" and to_role == "indoor" then
         return sameBuildingOk() and cost or nil
     end
 
-    if (fr == "indoor" and tr == "door") or (fr == "door" and tr == "indoor") then
+    if (from_role == "indoor" and to_role == "door") or (from_role == "door" and to_role == "indoor") then
         return sameBuildingOk() and cost or nil
     end
 
-    if fr == "door" and tr == "clearing" then
-        local b = registry[from_tile.building_id]
-        return (b ~= nil and b.clearing_tile == to_idx) and cost or nil
+    if from_role == "door" and to_role == "clearing" then
+        local building = registry[from_tile.building_id]
+        return (building ~= nil and building.clearing_tile == to_idx) and cost or nil
     end
 
-    if fr == "clearing" and tr == "door" then
-        local b = registry[to_tile.building_id]
-        return (b ~= nil and b.clearing_tile == from_idx) and cost or nil
+    if from_role == "clearing" and to_role == "door" then
+        local building = registry[to_tile.building_id]
+        return (building ~= nil and building.clearing_tile == from_idx) and cost or nil
     end
 
     return nil

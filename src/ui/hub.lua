@@ -32,9 +32,9 @@ hub.drag_y1     = nil
 hub.drag_x2     = nil
 hub.drag_y2     = nil
 
-local function screenToTile(sx, sy)
-    local wx, wy = camera.screenToWorld(sx, sy)
-    return math.floor(wx / TILE_SIZE) + 1, math.floor(wy / TILE_SIZE) + 1
+local function screenToTile(screen_x, screen_y)
+    local world_x, world_y = camera.screenToWorld(screen_x, screen_y)
+    return math.floor(world_x / TILE_SIZE) + 1, math.floor(world_y / TILE_SIZE) + 1
 end
 
 function hub.setMode(mode, state)
@@ -47,8 +47,8 @@ function hub.setMode(mode, state)
         hub.selected          = nil
         hub.selected_type     = nil
         hub.selected_tile_idx = nil
-        local mx, my = love.mouse.getPosition()
-        hub.drag_x2, hub.drag_y2 = screenToTile(mx, my)
+        local mouse_x, mouse_y = love.mouse.getPosition()
+        hub.drag_x2, hub.drag_y2 = screenToTile(mouse_x, mouse_y)
     else
         hub.drag_x2 = nil
         hub.drag_y2 = nil
@@ -63,17 +63,17 @@ local DESIGNATION_ACTIVITY = {
     gather = { activity_type = "gatherer",   resource_type = "berries" },
 }
 
-local function designateRect(lx, rx, ty, by, dtype)
-    local plant_type = DESIGNATION_PLANT[dtype]
-    local act_cfg    = DESIGNATION_ACTIVITY[dtype]
-    for x = lx, rx do
-        for y = ty, by do
+local function designateRect(left_x, right_x, top_y, bottom_y, designation_type)
+    local plant_type = DESIGNATION_PLANT[designation_type]
+    local act_cfg    = DESIGNATION_ACTIVITY[designation_type]
+    for x = left_x, right_x do
+        for y = top_y, bottom_y do
             if x >= 1 and x <= MAP_WIDTH and y >= 1 and y <= MAP_HEIGHT then
                 local tile_idx = tileIndex(x, y)
                 local tile = world.tiles[tile_idx]
                 if tile.plant_type == plant_type and tile.plant_growth >= 3
                         and tile.designation == nil then
-                    tile.designation = dtype
+                    tile.designation = designation_type
                     local act = activities.postActivity({
                         type          = act_cfg.activity_type,
                         x             = x,
@@ -87,9 +87,9 @@ local function designateRect(lx, rx, ty, by, dtype)
     end
 end
 
-local function cancelRect(lx, rx, ty, by)
-    for x = lx, rx do
-        for y = ty, by do
+local function cancelRect(left_x, right_x, top_y, bottom_y)
+    for x = left_x, right_x do
+        for y = top_y, bottom_y do
             if x >= 1 and x <= MAP_WIDTH and y >= 1 and y <= MAP_HEIGHT then
                 activities.cancelDesignation(tileIndex(x, y))
             end
@@ -100,21 +100,23 @@ end
 -- ─── Update ───────────────────────────────────────────────────────────────────
 
 function hub.update()
-    if hub.mode == "normal" then return end
-    local mx, my = love.mouse.getPosition()
-    hub.drag_x2, hub.drag_y2 = screenToTile(mx, my)
+    if hub.mode == "normal" then
+        return
+    end
+    local mouse_x, mouse_y = love.mouse.getPosition()
+    hub.drag_x2, hub.drag_y2 = screenToTile(mouse_x, mouse_y)
 end
 
 -- ─── Input ────────────────────────────────────────────────────────────────────
 
 function hub.mousepressed(x, y, button)
-    local tx, ty = screenToTile(x, y)
+    local tile_x, tile_y = screenToTile(x, y)
 
     if hub.mode == "placing" then
         if button == 1 then
             if hub.is_dragging == false then
                 hub.is_dragging = true
-                hub.drag_x1, hub.drag_y1 = tx, ty
+                hub.drag_x1, hub.drag_y1 = tile_x, tile_y
             end
         elseif button == 2 then
             hub.setMode("normal")
@@ -125,7 +127,7 @@ function hub.mousepressed(x, y, button)
         if button == 1 then
             if hub.is_dragging == false then
                 hub.is_dragging = true
-                hub.drag_x1, hub.drag_y1 = tx, ty
+                hub.drag_x1, hub.drag_y1 = tile_x, tile_y
             end
         elseif button == 2 then
             hub.setMode("normal")
@@ -136,7 +138,7 @@ function hub.mousepressed(x, y, button)
         if button == 1 then
             if hub.is_dragging == false then
                 hub.is_dragging = true
-                hub.drag_x1, hub.drag_y1 = tx, ty
+                hub.drag_x1, hub.drag_y1 = tile_x, tile_y
             end
         elseif button == 2 then
             hub.setMode("normal")
@@ -146,48 +148,48 @@ function hub.mousepressed(x, y, button)
 
     -- Normal mode
     if button == 1 then
-        if tx < 1 or tx > MAP_WIDTH or ty < 1 or ty > MAP_HEIGHT then
+        if tile_x < 1 or tile_x > MAP_WIDTH or tile_y < 1 or tile_y > MAP_HEIGHT then
             hub.selected          = nil
             hub.selected_type     = nil
             hub.selected_tile_idx = nil
             return
         end
 
-        local tile_idx = tileIndex(tx, ty)
-        local t        = world.tiles[tile_idx]
+        local tile_idx = tileIndex(tile_x, tile_y)
+        local tile     = world.tiles[tile_idx]
 
-        for i = 1, #t.unit_ids do
-            local u = registry[t.unit_ids[i]]
-            if u.is_dead == false then
-                hub.selected          = u
+        for i = 1, #tile.unit_ids do
+            local unit = registry[tile.unit_ids[i]]
+            if unit.is_dead == false then
+                hub.selected          = unit
                 hub.selected_type     = "unit"
                 hub.selected_tile_idx = tile_idx
                 return
             end
         end
 
-        if t.building_id ~= nil then
-            hub.selected          = registry[t.building_id]
+        if tile.building_id ~= nil then
+            hub.selected          = registry[tile.building_id]
             hub.selected_type     = "building"
             hub.selected_tile_idx = tile_idx
             return
         end
 
-        if t.ground_pile_id ~= nil then
-            hub.selected          = registry[t.ground_pile_id]
+        if tile.ground_pile_id ~= nil then
+            hub.selected          = registry[tile.ground_pile_id]
             hub.selected_type     = "ground pile"
             hub.selected_tile_idx = tile_idx
             return
         end
 
-        hub.selected          = t
+        hub.selected          = tile
         hub.selected_type     = "tile"
         hub.selected_tile_idx = tile_idx
 
     elseif button == 2 then
         if hub.selected_type == "unit" then
-            if tx >= 1 and tx <= MAP_WIDTH and ty >= 1 and ty <= MAP_HEIGHT then
-                units.startMove(hub.selected, tileIndex(tx, ty))
+            if tile_x >= 1 and tile_x <= MAP_WIDTH and tile_y >= 1 and tile_y <= MAP_HEIGHT then
+                units.startMove(hub.selected, tileIndex(tile_x, tile_y))
             end
         else
             hub.selected          = nil
@@ -198,14 +200,18 @@ function hub.mousepressed(x, y, button)
 end
 
 function hub.mousereleased(x, y, button)
-    if hub.is_dragging == false then return end
-    if button ~= 1 then return end
+    if hub.is_dragging == false then
+        return
+    end
+    if button ~= 1 then
+        return
+    end
     hub.is_dragging = false
 
-    local lx = math.min(hub.drag_x1, hub.drag_x2)
-    local rx = math.max(hub.drag_x1, hub.drag_x2)
-    local ty = math.min(hub.drag_y1, hub.drag_y2)
-    local by = math.max(hub.drag_y1, hub.drag_y2)
+    local left_x  = math.min(hub.drag_x1, hub.drag_x2)
+    local right_x = math.max(hub.drag_x1, hub.drag_x2)
+    local top_y   = math.min(hub.drag_y1, hub.drag_y2)
+    local bottom_y = math.max(hub.drag_y1, hub.drag_y2)
 
     if hub.mode == "placing" then
         if buildings.isValidPlacement(hub.drag_x1, hub.drag_y1, hub.drag_x2, hub.drag_y2) then
@@ -221,12 +227,12 @@ function hub.mousereleased(x, y, button)
 
     elseif hub.mode == "designating" then
         local ms = hub.mode_state
-        designateRect(lx, rx, ty, by, ms.designation_type)
+        designateRect(left_x, right_x, top_y, bottom_y, ms.designation_type)
         hub.drag_x1 = nil
         hub.drag_y1 = nil   -- mode persists
 
     elseif hub.mode == "cancelling" then
-        cancelRect(lx, rx, ty, by)
+        cancelRect(left_x, right_x, top_y, bottom_y)
         hub.drag_x1 = nil
         hub.drag_y1 = nil   -- mode persists
     end
@@ -251,9 +257,9 @@ function hub.keypressed(key)
         return true
     end
     if key == "f4" then
-        local mx, my = love.mouse.getPosition()
-        local tx, ty = screenToTile(mx, my)
-        buildings.placeTilemapBuilding("cottage", tx, ty, "S")
+        local mouse_x, mouse_y = love.mouse.getPosition()
+        local tile_x, tile_y   = screenToTile(mouse_x, mouse_y)
+        buildings.placeTilemapBuilding("cottage", tile_x, tile_y, "S")
         return true
     end
     if hub.mode ~= "normal" then
@@ -280,52 +286,54 @@ local COL_DESIG     = { 0.95, 0.65, 0.10, 0.45 }
 local COL_CANCEL    = { 1, 0.20, 0.20, 0.45 }
 
 function hub.drawWorld()
-    if hub.drag_x1 == nil or hub.drag_x2 == nil then return end
+    if hub.drag_x1 == nil or hub.drag_x2 == nil then
+        return
+    end
 
-    local lx = math.min(hub.drag_x1, hub.drag_x2)
-    local rx = math.max(hub.drag_x1, hub.drag_x2)
-    local ty = math.min(hub.drag_y1, hub.drag_y2)
-    local by = math.max(hub.drag_y1, hub.drag_y2)
-    local ts = TILE_SIZE
+    local left_x  = math.min(hub.drag_x1, hub.drag_x2)
+    local right_x = math.max(hub.drag_x1, hub.drag_x2)
+    local top_y   = math.min(hub.drag_y1, hub.drag_y2)
+    local bottom_y = math.max(hub.drag_y1, hub.drag_y2)
+    local tile_size = TILE_SIZE
 
     if hub.mode == "placing" then
-        for x = lx, rx do
-            for y = ty, by do
+        for x = left_x, right_x do
+            for y = top_y, bottom_y do
                 if x >= 1 and x <= MAP_WIDTH and y >= 1 and y <= MAP_HEIGHT then
                     if buildings.isValidTile(world.tiles[tileIndex(x, y)]) then
                         love.graphics.setColor(COL_PLACE_OK)
                     else
                         love.graphics.setColor(COL_PLACE_BAD)
                     end
-                    love.graphics.rectangle("fill", (x - 1) * ts, (y - 1) * ts, ts, ts)
+                    love.graphics.rectangle("fill", (x - 1) * tile_size, (y - 1) * tile_size, tile_size, tile_size)
                 end
             end
         end
 
     elseif hub.mode == "designating" then
-        local ms = hub.mode_state
+        local ms         = hub.mode_state
         local plant_type = DESIGNATION_PLANT[ms.designation_type]
-        for x = lx, rx do
-            for y = ty, by do
+        for x = left_x, right_x do
+            for y = top_y, bottom_y do
                 if x >= 1 and x <= MAP_WIDTH and y >= 1 and y <= MAP_HEIGHT then
                     local tile = world.tiles[tileIndex(x, y)]
                     if tile.plant_type == plant_type and tile.plant_growth >= 3
                             and tile.designation == nil then
                         love.graphics.setColor(COL_DESIG)
-                        love.graphics.rectangle("fill", (x - 1) * ts, (y - 1) * ts, ts, ts)
+                        love.graphics.rectangle("fill", (x - 1) * tile_size, (y - 1) * tile_size, tile_size, tile_size)
                     end
                 end
             end
         end
 
     elseif hub.mode == "cancelling" then
-        for x = lx, rx do
-            for y = ty, by do
+        for x = left_x, right_x do
+            for y = top_y, bottom_y do
                 if x >= 1 and x <= MAP_WIDTH and y >= 1 and y <= MAP_HEIGHT then
                     local tile = world.tiles[tileIndex(x, y)]
                     if tile.designation ~= nil then
                         love.graphics.setColor(COL_CANCEL)
-                        love.graphics.rectangle("fill", (x - 1) * ts, (y - 1) * ts, ts, ts)
+                        love.graphics.rectangle("fill", (x - 1) * tile_size, (y - 1) * tile_size, tile_size, tile_size)
                     end
                 end
             end
