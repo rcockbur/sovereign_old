@@ -1,5 +1,5 @@
 # Sovereign — TABLES.md
-*v20 · Reference data: game entity data structures, config tables, and production chains.*
+*v21 · Reference data: game entity data structures, config tables, and production chains.*
 
 ## Data Structures
 
@@ -140,6 +140,11 @@ tile = {
     plant_type = nil,        -- nil | "tree" | "herb_bush" | "berry_bush"
     plant_growth = 0,        -- 0=empty, 1=seedling, 2=young, 3=mature
     building_id = nil,
+    building_role = nil,     -- nil | "indoor" | "door" | "impassable"
+                             --   Set when tile belongs to a building footprint (with building_id).
+                             --   See WORLD.md Building Layout, Pathfinding Edge Connectivity.
+    is_clearing = false,     -- true when this tile is any building's derived clearing tile.
+                             --   N:1 with buildings (can be shared) — no back-reference stored here.
     ground_pile_id = nil,    -- ground pile entity id, or nil
     forest_depth = 0.0,
     is_explored = false,
@@ -210,6 +215,9 @@ building = {
     category = "housing",    -- "storage" | "housing" | "farming" | "gathering" | "extraction" | "processing" | "service"
     x = 0, y = 0, width = 0, height = 0,
     orientation = "S",       -- "N" | "S" | "E" | "W" — door facing direction (nil for player-sized and solid buildings)
+    clearing_tile = nil,     -- flat tile index of this building's clearing (nil for solid and player-sized buildings).
+                             --   Derived at placement time as the tile immediately outward from the door on the door face.
+                             --   See WORLD.md Building Layout Clearing.
     phase = "constructing",  -- "blueprint" | "constructing" | "complete"
     is_deleted = false,      -- flagged for deletion, swept at end of tick
 
@@ -714,19 +722,18 @@ BuildingConfig = {
     -- Housing (food stored in typed bins from HousingBinConfig)
     cottage = {
         category = "housing",
-        width = 5, height = 4,
+        width = 3, height = 3,
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 6 * TICKS_PER_HOUR,
         tile_map = {
-            "W", "W", "W", "W", "W",
-            "W", "F", "F", "F", "W",
-            "W", "F", "F", "F", "W",
-            "W", "W", "D", "W", "W",
+            "I", "I", "I",
+            "I", "I", "I",
+            "I", "D", "I",
         },
         layout = {
             beds = {
-                { x = 1, y = 1 }, { x = 3, y = 1 },
-                { x = 1, y = 2 }, { x = 3, y = 2 },
+                { x = 0, y = 0 }, { x = 2, y = 0 },
+                { x = 0, y = 1 }, { x = 2, y = 1 },
             },
         },
     },
@@ -766,43 +773,40 @@ BuildingConfig = {
     -- Activity posting gated on unclaimed valid target count (see BEHAVIOR.md Gathering Work Cycle).
     woodcutters_camp = {
         category = "gathering",
-        is_solid = true,
         width = 2, height = 2,
         build_cost = { wood = 20 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
         activity_type = "woodcutter",
         tile_map = {
-            "W", "W",
-            "W", "W",
+            "X", "X",
+            "X", "X",
         },
         layout = {},
     },
     gatherers_hut = {
         category = "gathering",
-        is_solid = true,
         width = 2, height = 2,
         build_cost = { wood = 15 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
         activity_type = "gatherer",
         tile_map = {
-            "W", "W",
-            "W", "W",
+            "X", "X",
+            "X", "X",
         },
         layout = {},
     },
     herbalists_hut = {
         category = "gathering",
-        is_solid = true,
         width = 2, height = 2,
         build_cost = { wood = 15 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
         activity_type = "herbalist",
         tile_map = {
-            "W", "W",
-            "W", "W",
+            "X", "X",
+            "X", "X",
         },
         layout = {},
     },
@@ -817,15 +821,14 @@ BuildingConfig = {
         max_workers = 3,
         activity_type = "fisher",
         tile_map = {
-            "F", "F", "F",
-            "W", "F", "W",
-            "W", "D", "W",
+            "I", "I", "I",
+            "I", "I", "I",
+            "I", "D", "I",
         },
         layout = {
             workstation = { { x = 0, y = 0 }, { x = 1, y = 0 }, { x = 2, y = 0 } },
         },
-        -- Back row on water, front row on grass/dirt. 2-deep water clearing behind back row.
-        -- Back-row perimeter F tiles allowed per perimeter F exception (see WORLD.md Dead-End Rule).
+        -- Back row on water, front row on grass/dirt. 2 tiles behind back row must also be water.
     },
     iron_mine = {
         category = "extraction",

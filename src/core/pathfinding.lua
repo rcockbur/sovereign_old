@@ -59,8 +59,6 @@ local function heapPop()
     return f, idx
 end
 
-local getTileCost = world.getTileCost
-
 local function clamp(v, lo, hi)
     if v < lo then
         return lo
@@ -96,7 +94,7 @@ end
 
 -- Shared A* core. is_goal(idx, x, y) and heuristic(x, y) are injected by callers.
 -- Early termination on first goal discovery is valid because octile distance is consistent.
-local function astar(tiles, start_idx, is_goal, heuristic)
+local function astar(start_idx, is_goal, heuristic, exempt_building_id)
     local sx, sy = tileXY(start_idx)
     if is_goal(start_idx, sx, sy) then
         return { tiles = {}, current = 1 }
@@ -126,15 +124,21 @@ local function astar(tiles, start_idx, is_goal, heuristic)
                 if nx >= 1 and nx <= MAP_WIDTH and ny >= 1 and ny <= MAP_HEIGHT then
                     local n_idx = tileIndex(nx, ny)
                     if not closed[n_idx] then
-                        local cost = getTileCost(tiles[n_idx])
+                        local cost = world.getEdgeCost(cur_idx, n_idx, exempt_building_id)
                         if cost ~= nil then
                             local passable = true
                             if dir.is_diagonal then
-                                if getTileCost(tiles[tileIndex(nx, cy)]) == nil or
-                                   getTileCost(tiles[tileIndex(cx, ny)]) == nil then
+                                local a_idx = tileIndex(nx, cy)
+                                local b_idx = tileIndex(cx, ny)
+                                if world.getEdgeCost(cur_idx, a_idx, exempt_building_id) == nil or
+                                   world.getEdgeCost(cur_idx, b_idx, exempt_building_id) == nil or
+                                   world.getEdgeCost(a_idx,   n_idx, exempt_building_id) == nil or
+                                   world.getEdgeCost(b_idx,   n_idx, exempt_building_id) == nil then
                                     passable = false
                                 end
-                                if passable then cost = cost * SQRT2 end
+                                if passable then
+                                    cost = cost * SQRT2
+                                end
                             end
                             if passable then
                                 local new_g = cur_g + cost
@@ -157,40 +161,40 @@ local function astar(tiles, start_idx, is_goal, heuristic)
     return nil
 end
 
-function pathfinding.findPath(tiles, start_idx, goal_idx, exempt_building_id)
+function pathfinding.findPath(start_idx, goal_idx, exempt_building_id)
     local gx, gy = tileXY(goal_idx)
 
-    local function is_goal(idx, tx, ty)
+    local function is_goal(idx, x, y)
         return idx == goal_idx
     end
 
-    local function heuristic(tx, ty)
-        local dx = math.abs(tx - gx)
-        local dy = math.abs(ty - gy)
+    local function heuristic(x, y)
+        local dx = math.abs(x - gx)
+        local dy = math.abs(y - gy)
         return (math.max(dx, dy) + (SQRT2 - 1) * math.min(dx, dy)) * BASE_MOVE_COST
     end
 
-    return astar(tiles, start_idx, is_goal, heuristic)
+    return astar(start_idx, is_goal, heuristic, exempt_building_id)
 end
 
-function pathfinding.findPathAdjacentToRect(tiles, start_idx, rx, ry, rw, rh, exempt_building_id)
-    local function is_goal(idx, tx, ty)
-        local nearest_x = clamp(tx, rx, rx + rw - 1)
-        local nearest_y = clamp(ty, ry, ry + rh - 1)
-        local dist = math.abs(tx - nearest_x) + math.abs(ty - nearest_y)
-        return dist == 1 and tiles[idx].target_of_unit == nil
+function pathfinding.findPathAdjacentToRect(start_idx, rx, ry, rw, rh, exempt_building_id)
+    local function is_goal(idx, x, y)
+        local nearest_x = clamp(x, rx, rx + rw - 1)
+        local nearest_y = clamp(y, ry, ry + rh - 1)
+        local dist = math.abs(x - nearest_x) + math.abs(y - nearest_y)
+        return dist == 1 and world.tiles[idx].target_of_unit == nil
     end
 
-    local function heuristic(tx, ty)
-        local nearest_x = clamp(tx, rx, rx + rw - 1)
-        local nearest_y = clamp(ty, ry, ry + rh - 1)
-        local dx = math.abs(tx - nearest_x)
-        local dy = math.abs(ty - nearest_y)
+    local function heuristic(x, y)
+        local nearest_x = clamp(x, rx, rx + rw - 1)
+        local nearest_y = clamp(y, ry, ry + rh - 1)
+        local dx = math.abs(x - nearest_x)
+        local dy = math.abs(y - nearest_y)
         local octile = (math.max(dx, dy) + (SQRT2 - 1) * math.min(dx, dy)) * BASE_MOVE_COST
         return math.max(0, octile - BASE_MOVE_COST)
     end
 
-    return astar(tiles, start_idx, is_goal, heuristic)
+    return astar(start_idx, is_goal, heuristic, exempt_building_id)
 end
 
 return pathfinding

@@ -61,14 +61,14 @@ AGE_OF_SCHOOLING = 6
 -- FROST_DECAY_RATE              — maturity loss per tick on unharvested crops after frost
 
 -- Plants
-SPREAD_TILES_PER_TICK = 50
+SPREAD_TILES_PER_TICK = 40
 
 -- Visibility (all tiles explored/visible until implemented)
 SIGHT_RADIUS        = 8
 FOREST_SIGHT_RADIUS = 3
 
 -- Movement
-BASE_MOVE_COST       = 40        -- ticks per tile on open ground
+BASE_MOVE_COST       = 50        -- ticks per tile on open ground
 TREE_MOVE_MULTIPLIER = 3.0      -- trees stage 2+ slow movement
 SQRT2                = math.sqrt(2)
 
@@ -93,14 +93,6 @@ FOOD_VARIETY_WINDOW = 3 * TICKS_PER_DAY
 -- Work day and recreation
 WORK_DAY_RESET_HOUR      = 4
 RECREATION_WANDER_RADIUS = 6
-
--- Building layout tile types
-TILE_WALL  = "W"
-TILE_FLOOR = "F"
-TILE_DOOR  = "D"
-
--- Building placement
-CLEARING_DEPTH = 1    -- tiles in front of door face that cannot have buildings
 
 -- Rendering
 TILE_SIZE = 32

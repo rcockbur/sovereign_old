@@ -223,20 +223,22 @@ local function displayBuildingInfo(building, lines)
     row(lines, "posted_activity_ids: "..table.concat(building.posted_activity_ids, ", "))
     row(lines, "")
 
-    sec(lines, "storage")
-    local res_in_parts, res_out_parts = {}, {}
-    for rtype, amt in pairs(building.storage.reserved_in) do
-        res_in_parts[#res_in_parts + 1] = rtype .. "=" .. amt
-    end
-    for rtype, amt in pairs(building.storage.reserved_out) do
-        res_out_parts[#res_out_parts + 1] = rtype .. "=" .. amt
-    end
-    row(lines, "  reserved_in:  " .. (#res_in_parts  > 0 and table.concat(res_in_parts,  " ") or "{}"))
-    row(lines, "  reserved_out: " .. (#res_out_parts > 0 and table.concat(res_out_parts, " ") or "{}"))
-    for tile_index, tile_entry in ipairs(building.storage.tiles) do
-        for _, resource_id in ipairs(tile_entry.contents) do
-            local resource = registry[resource_id]
-            row(lines, "    Tile "..tile_index.." - Resource "..resource_id.." - "..resource.amount.." "..resource.type)
+    if building.storage ~= nil then
+        sec(lines, "storage")
+        local res_in_parts, res_out_parts = {}, {}
+        for rtype, amt in pairs(building.storage.reserved_in) do
+            res_in_parts[#res_in_parts + 1] = rtype .. "=" .. amt
+        end
+        for rtype, amt in pairs(building.storage.reserved_out) do
+            res_out_parts[#res_out_parts + 1] = rtype .. "=" .. amt
+        end
+        row(lines, "  reserved_in:  " .. (#res_in_parts  > 0 and table.concat(res_in_parts,  " ") or "{}"))
+        row(lines, "  reserved_out: " .. (#res_out_parts > 0 and table.concat(res_out_parts, " ") or "{}"))
+        for tile_index, tile_entry in ipairs(building.storage.tiles) do
+            for _, resource_id in ipairs(tile_entry.contents) do
+                local resource = registry[resource_id]
+                row(lines, "    Tile "..tile_index.." - Resource "..resource_id.." - "..resource.amount.." "..resource.type)
+            end
         end
     end
 

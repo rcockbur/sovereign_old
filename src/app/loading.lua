@@ -141,23 +141,25 @@ function validateTileMap(building_type, cfg)
         "BuildingConfig." .. building_type .. ": tile_map length " .. #cfg.tile_map
         .. " does not match width*height=" .. (w * h))
 
-    if cfg.is_solid == true then
+    local d_count = 0
+    for _, symbol in ipairs(cfg.tile_map) do
+        if symbol == "D" then
+            d_count = d_count + 1
+        end
+    end
+
+    if d_count == 0 then
+        -- Solid building: all tiles must be X, layout must be empty
         assert(cfg.layout and next(cfg.layout) == nil,
-            "BuildingConfig." .. building_type .. ": is_solid=true requires empty layout table")
-        for i, tile in ipairs(cfg.tile_map) do
-            assert(tile == "W",
+            "BuildingConfig." .. building_type .. ": solid tile_map (no D) requires empty layout table")
+        for i, symbol in ipairs(cfg.tile_map) do
+            assert(symbol == "X",
                 "BuildingConfig." .. building_type
-                .. ": is_solid=true tile_map must contain only W tiles (index " .. i .. " is '" .. tile .. "')")
+                .. ": solid tile_map must contain only X tiles (index " .. i .. " is '" .. symbol .. "')")
         end
         return
     end
 
-    local d_count = 0
-    for _, tile in ipairs(cfg.tile_map) do
-        if tile == "D" then
-            d_count = d_count + 1
-        end
-    end
     assert(d_count == 1,
         "BuildingConfig." .. building_type
         .. ": tile_map must have exactly 1 D tile (found " .. d_count .. ")")
@@ -167,11 +169,11 @@ function validateTileMap(building_type, cfg)
             if type(positions) == "table" then
                 for _, pos in ipairs(positions) do
                     if type(pos) == "table" and pos.x ~= nil and pos.y ~= nil then
-                        local tile = getTile(cfg.tile_map, w, pos.x, pos.y)
-                        assert(tile == "F" or tile == "D",
+                        local symbol = getTile(cfg.tile_map, w, pos.x, pos.y)
+                        assert(symbol == "I" or symbol == "D",
                             "BuildingConfig." .. building_type .. ": layout." .. field
                             .. " position (" .. pos.x .. "," .. pos.y .. ") is on '"
-                            .. tostring(tile) .. "' (must be F or D)")
+                            .. tostring(symbol) .. "' (must be I or D)")
                     end
                 end
             end
@@ -179,26 +181,26 @@ function validateTileMap(building_type, cfg)
     end
 
     local reachable = reachableFromDoor(cfg.tile_map, w, h)
-    for i, tile in ipairs(cfg.tile_map) do
-        if tile == "F" or tile == "D" then
+    for i, symbol in ipairs(cfg.tile_map) do
+        if symbol == "I" or symbol == "D" then
             local x = (i - 1) % w
             local y = math.floor((i - 1) / w)
             assert(reachable[y * w + x],
-                "BuildingConfig." .. building_type .. ": tile '" .. tile
+                "BuildingConfig." .. building_type .. ": tile '" .. symbol
                 .. "' at (" .. x .. "," .. y .. ") is not reachable from the D tile")
         end
     end
 
-    -- Skip perimeter check for buildings with a placement constraint (water/rock edge buildings
-    -- have back-face F tiles by design — see WORLD.md Dead-End Rule).
+    -- D must be on the perimeter (skip for placement-constrained buildings — see WORLD.md)
     if not cfg.placement then
-        for i, tile in ipairs(cfg.tile_map) do
-            local x = (i - 1) % w
-            local y = math.floor((i - 1) / w)
-            local is_perimeter = (x == 0 or x == w - 1 or y == 0 or y == h - 1)
-            if is_perimeter and tile == "F" then
-                error("BuildingConfig." .. building_type
-                    .. ": non-D perimeter tile at (" .. x .. "," .. y .. ") is F (must be W)")
+        for i, symbol in ipairs(cfg.tile_map) do
+            if symbol == "D" then
+                local x = (i - 1) % w
+                local y = math.floor((i - 1) / w)
+                local is_perimeter = (x == 0 or x == w - 1 or y == 0 or y == h - 1)
+                assert(is_perimeter,
+                    "BuildingConfig." .. building_type
+                    .. ": D tile at (" .. x .. "," .. y .. ") must be on the perimeter")
             end
         end
     end
@@ -206,8 +208,8 @@ end
 
 function reachableFromDoor(tile_map, width, height)
     local d_x, d_y = nil, nil
-    for i, tile in ipairs(tile_map) do
-        if tile == "D" then
+    for i, symbol in ipairs(tile_map) do
+        if symbol == "D" then
             d_x = (i - 1) % width
             d_y = math.floor((i - 1) / width)
             break
@@ -230,8 +232,8 @@ function reachableFromDoor(tile_map, width, height)
             if nx >= 0 and nx < width and ny >= 0 and ny < height then
                 local key = ny * width + nx
                 if not visited[key] then
-                    local ntile = getTile(tile_map, width, nx, ny)
-                    if ntile == "F" or ntile == "D" then
+                    local nsymbol = getTile(tile_map, width, nx, ny)
+                    if nsymbol == "I" or nsymbol == "D" then
                         visited[key] = true
                         queue[#queue + 1] = { nx, ny }
                     end

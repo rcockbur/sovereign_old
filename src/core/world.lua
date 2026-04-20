@@ -1,7 +1,8 @@
 -- core/world.lua
 -- World state: tile grid, entity arrays, time, settings. Map generation pipeline.
 
-local log = require("core.log")
+local log      = require("core.log")
+local registry = require("core.registry")
 
 local world = {}
 
@@ -323,16 +324,97 @@ logGenStats = function()
         forest.grass, forest.water, forest.rock, forest.tree, forest.berry)
 end
 
--- ── Tile cost ────────────────────────────────────────────────────────────────
+-- ── Edge cost ────────────────────────────────────────────────────────────────
 
-function world.getTileCost(tile)
-    if tile.terrain == "water" or tile.terrain == "rock" then
+local function resolveRole(tile)
+    if tile.building_role ~= nil then
+        return tile.building_role
+    end
+    if tile.is_clearing == true then
+        return "clearing"
+    end
+    return "outdoor"
+end
+
+local function destBaseCost(to_tile, to_role)
+    if to_role == "impassable" then
         return nil
     end
-    if tile.plant_type == "tree" and tile.plant_growth >= 2 then
+    if to_tile.terrain == "water" or to_tile.terrain == "rock" then
+        if to_role == "indoor" or to_role == "door" then
+            return BASE_MOVE_COST
+        end
+        return nil
+    end
+    if to_tile.plant_type == "tree" and to_tile.plant_growth >= 2 then
         return BASE_MOVE_COST * TREE_MOVE_MULTIPLIER
     end
     return BASE_MOVE_COST
+end
+
+function world.getEdgeCost(from_idx, to_idx, exempt_building_id)
+    local from_tile = world.tiles[from_idx]
+    local to_tile   = world.tiles[to_idx]
+
+    -- Phase check: non-complete building tiles are impassable unless exempt
+    if to_tile.building_id ~= nil and to_tile.building_id ~= exempt_building_id then
+        local b = registry[to_tile.building_id]
+        if b ~= nil and b.phase ~= "complete" then
+            return nil
+        end
+    end
+
+    local from_role = resolveRole(from_tile)
+    local to_role   = resolveRole(to_tile)
+
+    -- Exempt destination: always traversable (used for blueprint/construction access)
+    if exempt_building_id ~= nil and to_tile.building_id == exempt_building_id then
+        local effective_role = (to_role == "impassable") and "indoor" or to_role
+        return destBaseCost(to_tile, effective_role)
+    end
+
+    local cost = destBaseCost(to_tile, to_role)
+    if cost == nil then
+        return nil
+    end
+
+    local from_is_exempt = exempt_building_id ~= nil
+                           and from_tile.building_id == exempt_building_id
+
+    local function sameBuildingOk()
+        if from_is_exempt then
+            return to_tile.building_id == exempt_building_id
+        end
+        return from_tile.building_id == to_tile.building_id
+    end
+
+    local fr = from_role
+    local tr = to_role
+
+    -- outdoor/clearing combinations always allowed
+    if (fr == "outdoor" or fr == "clearing") and (tr == "outdoor" or tr == "clearing") then
+        return cost
+    end
+
+    if fr == "indoor" and tr == "indoor" then
+        return sameBuildingOk() and cost or nil
+    end
+
+    if (fr == "indoor" and tr == "door") or (fr == "door" and tr == "indoor") then
+        return sameBuildingOk() and cost or nil
+    end
+
+    if fr == "door" and tr == "clearing" then
+        local b = registry[from_tile.building_id]
+        return (b ~= nil and b.clearing_tile == to_idx) and cost or nil
+    end
+
+    if fr == "clearing" and tr == "door" then
+        local b = registry[to_tile.building_id]
+        return (b ~= nil and b.clearing_tile == from_idx) and cost or nil
+    end
+
+    return nil
 end
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -343,6 +425,8 @@ newTile = function()
         plant_type     = nil,
         plant_growth   = 0,
         building_id    = nil,
+        building_role  = nil,
+        is_clearing    = false,
         ground_pile_id = nil,
         forest_depth   = 0.0,
         is_explored    = false,

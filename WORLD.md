@@ -1,5 +1,5 @@
 # Sovereign — WORLD.md
-*v12 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
+*v13 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
 
 ## Map
 
@@ -83,16 +83,41 @@ Dirt exists as a terrain type but is not placed by the current pipeline. A cosme
 
 A* with a binary heap open list. No path caching — computed on demand each time a unit needs to move.
 
-TILE COSTS
+Pathfinding is **edge-based**, not tile-based. Whether a unit can move from tile A to tile B depends on both tiles' building roles, not just B's passability. This is what gates units from clipping through walls — buildings no longer use a ring of impassable wall tiles, and containment is instead enforced by which tile-to-tile transitions are allowed.
 
-- Grass/dirt: `BASE_MOVE_COST` (6 ticks)
-- Building floor/door tiles (F/D): `BASE_MOVE_COST` (6 ticks)
-- Building wall tiles (W): impassable
-- Trees stage 2+: `BASE_MOVE_COST * TREE_MOVE_MULTIPLIER` (18 ticks). Trees slow movement but do not block pathing.
-- Rock, water: impassable
-- Blueprint tiles (`phase == "blueprint"`): impassable unless the A* exemption applies (see A* Building Exemption)
-- Constructing tiles (`phase == "constructing"`): impassable
-- Diagonal movement allowed when both orthogonal neighbors are passable. Diagonal cost = √2 × destination tile cost.
+TILE BASE COST
+
+Cost of entering a pathable tile:
+
+- Grass/dirt: `BASE_MOVE_COST` (40 ticks)
+- Indoor or door tiles (I/D) of a completed building: `BASE_MOVE_COST`
+- Trees stage 2+: `BASE_MOVE_COST * TREE_MOVE_MULTIPLIER` (120 ticks). Trees slow movement but do not block pathing.
+
+Impassable tiles:
+
+- Rock, water (unless overridden by a building role — see below)
+- Impassable building tiles (X)
+- Blueprint tiles (`phase == "blueprint"`): impassable unless the A* building exemption applies (see A* Building Exemption)
+- Constructing tiles (`phase == "constructing"`): impassable unless the A* building exemption applies
+
+**Building role overrides terrain.** An I or D tile on rock/water is pathable (docks, mines). An X tile on grass is impassable. Building role wins for the duration of the building's lifetime; on deletion, terrain reasserts.
+
+EDGE CONNECTIVITY
+
+Let `role(t)` be `indoor`, `door`, `impassable`, `clearing`, or `outdoor` (the default for any tile with no building role and `is_clearing == false`). A traversal from tile A to an orthogonal neighbor B is allowed only when the pair falls within the following table:
+
+| From | To | Condition |
+|---|---|---|
+| `indoor` | `indoor` | Same `building_id` |
+| `indoor` | `door` | Same `building_id` |
+| `door` | `clearing` | `to_tile_index == world.buildings[from.building_id].clearing_tile` |
+| `clearing` | `outdoor` | Always |
+| `clearing` | `clearing` | Always |
+| `outdoor` | `outdoor` | Always |
+
+All other pairs are blocked. Edges are symmetric — if A→B is allowed, B→A is allowed under the same condition evaluated in the opposite direction. The `door ↔ clearing` condition in both directions flows through the door tile's `building_id`.
+
+Diagonal movement is allowed when both orthogonal 2-step paths are clear. For a diagonal A→C where B and B' are the two tiles orthogonally adjacent to both A and C, all four edges (A→B, B→C, A→B', B'→C) must be allowed per the table above. Diagonal cost = √2 × destination tile cost. This rule prevents corner-clipping through doorways — a unit on an outdoor tile diagonal to a door cannot step to the door directly, because the outdoor→door edge is not allowed; they must move orthogonally through the clearing.
 
 HEURISTIC
 
@@ -129,12 +154,18 @@ If no tile satisfies the goal condition (all orthogonal neighbors are impassable
 
 A* BUILDING EXEMPTION
 
-A* accepts an optional `exempt_building_id` parameter. When set, all tiles belonging to that building are treated as pathable for that query regardless of building phase. This is a single mechanism that covers two cases:
+A* accepts an optional `exempt_building_id` parameter. When set, for the duration of that query:
 
-- **Blueprint clearing (P2):** A unit whose current position or A* target is on a blueprint's footprint needs to path through that blueprint's tiles (to clear obstructions or evacuate). The caller passes the blueprint's building id as the exemption.
-- **Escape from completed building (P2):** A unit that starts A* on a tile belonging to a completed building (e.g., after construction completes around them) needs to path out. The caller passes that building's id as the exemption.
+- All tiles with `building_id == exempt_building_id` are treated as pathable (regardless of phase or `building_role`)
+- Same-building connectivity checks (`indoor ↔ indoor`, `indoor ↔ door`) pass for tiles belonging to the exempt building even if they would otherwise fail the building_id equality check
+- The `door ↔ clearing` check passes for the exempt building's door and clearing
 
-Units without the exemption cannot path through blueprint or building tiles. This prevents non-construction units from routing through blueprints while allowing clearing workers and evacuees to reach their targets.
+This single mechanism covers two cases:
+
+- **Blueprint clearing (P2):** A unit whose target is on a blueprint's footprint needs to path onto that blueprint's tiles (to clear obstructions or evacuate). The caller passes the blueprint's building id as the exemption.
+- **Escape from completed building (P2):** A unit that starts on a tile belonging to a completed building (e.g., after construction completes around them, leaving them on an X tile or an indoor tile of a foreign building) needs to path out. The caller passes that building's id as the exemption.
+
+Units without the exemption cannot path through blueprint, constructing, or X tiles. This prevents non-construction units from routing through blueprints while allowing clearing workers and evacuees to reach their targets.
 
 PATH STORAGE
 
@@ -218,44 +249,45 @@ If A* returns no path, the unit is trapped. A notification fires. The unit idles
 
 ## Building Layout
 
-Buildings use a tile map defining which tiles are walls, floor, or doors. Units path inside buildings through the door to reach functional positions (workstations, beds, seats).
+Buildings use a tile map defining the role each footprint tile plays. Containment is enforced by edge connectivity rules (see Pathfinding Edge Connectivity), not by a ring of impassable wall tiles. This keeps building footprints compact — only the useful tiles are part of the footprint.
 
 TILE TYPES
 
-| Type | Meaning | Pathability |
+| Symbol | Role | Pathability |
 |---|---|---|
-| `W` | Wall | Impassable |
-| `F` | Floor | Passable (interior) |
-| `D` | Door | Passable (perimeter opening) |
+| `I` | Indoor | Passable interior. Connects to other I/D of same building. |
+| `D` | Door | Passable perimeter opening. Connects to same-building I and to the building's clearing. |
+| `X` | Impassable | Building mass that blocks pathing (solid towers, decorative blockers). |
 
-DEAD-END RULE
-
-Every enclosed building has exactly one door. All other perimeter tiles are walls. A* never routes through buildings because there is no second exit. No cost penalty needed.
-
-**Perimeter F exception:** Buildings with impassable-terrain clearing (fishing dock on water, mines on rock) may have perimeter F tiles on the face adjacent to that clearing. The dead-end property holds naturally because the opening leads onto impassable terrain — A* cannot enter from that side.
+The clearing tile is **not** authored in the tile map. It is derived at placement time as the one tile immediately outward from the door on the building's door face. Stored on the building as `building.clearing_tile`; flagged on the tile as `tile.is_clearing = true`.
 
 TILE MAP
 
-Each BuildingConfig defines a `tile_map` — a flat array of tile type strings read row by row, left to right, top to bottom:
+Each BuildingConfig defines a `tile_map` — a flat array of tile role symbols read row by row, left to right, top to bottom:
 
 ```lua
 bakery = {
     width = 3, height = 3,
     tile_map = {
-        "W", "W", "W",
-        "F", "F", "F",
-        "W", "D", "W",
+        "I", "I", "I",
+        "I", "I", "I",
+        "I", "D", "I",
     },
 }
 ```
 
-Config validation asserts: exactly one D tile, all non-D perimeter tiles are W (unless the perimeter F exception applies — see Dead-End Rule), all F/D tiles are contiguous and reachable from D, all layout positions fall on F or D tiles. Solid buildings (`is_solid = true`) skip all of the above — their tile map is all W, they have no door, no layout positions, and no clearing.
+Config validation asserts:
+
+- **Solid buildings** (tile_map entirely `X`, empty `layout`): no additional rules.
+- **Non-solid buildings:** exactly one D tile; D tile on the perimeter; all I tiles contiguous and reachable from D through same-building edges; all layout positions fall on I or D tiles; X tiles may appear anywhere in the tile_map.
+
+The old wall-ring requirement is gone. A building's perimeter is no longer required to be walled — tiles outside the footprint simply aren't part of the building at all.
 
 LAYOUT POSITIONS
 
 Each building has a `layout` table defining positions within the footprint:
 
-**Functional positions** (on F or D tiles — units path here): `workstation`, `beds`, `seats`. `workstation` is always an array — single-worker buildings have one element.
+**Functional positions** (on I or D tiles — units path here): `workstation`, `beds`, `seats`. `workstation` is always an array — single-worker buildings have one element.
 
 ```lua
 bakery = {
@@ -275,59 +307,71 @@ cottage = {
 
 CLEARING
 
-A strip of tiles 1 deep on the door face extending outward from the building. These are normal ground tiles — the building does not own them — but placement validation prevents other buildings' wall tiles from being placed on them. Clearing tiles from different buildings can overlap, allowing face-to-face placement with a shared walkable corridor.
+Every non-solid building has exactly one clearing tile — the tile directly outward from the door on the door face. Derived at placement time from door position and building orientation; stored on the building as `building.clearing_tile`. The corresponding tile's `is_clearing` flag is set on placement.
 
-**Solid buildings** (`is_solid = true`) have no door and no clearing. Workers path adjacent-to-rect to reach them.
+Clearings are **shareable**. Two buildings placed face-to-face across a single tile can both register that tile as their clearing. The tile's `is_clearing` flag is set as long as any building claims it. On building deletion, the flag clears only if no other building still claims the tile — cleanup scans buildings for matching `clearing_tile`.
 
-**Impassable-terrain clearing:** Buildings with impassable-terrain placement (fishing dock on water, mines on rock) have an additional clearing strip on the back face (opposite the door). This clearing requires the appropriate impassable terrain type rather than pathable ground. Fishing docks have a 2-deep water clearing behind the back row. Mines have a 1-deep rock clearing behind the back row.
+Clearings are the *only* way to transition between outdoor space and a building's interior. A unit must pass outdoor → clearing → door → indoor. This sequence is enforced by the edge connectivity rules — outdoor connects to clearing, clearing connects to door (matched by building_id), door connects to indoor (same building_id).
+
+Since clearings can be shared across buildings, a tile flagged `is_clearing` contains no back-reference to which buildings claim it. The `door ↔ clearing` edge check flows from the door side: the door's building is known from the door tile's `building_id`, and the check compares `building.clearing_tile == to_tile_index`.
 
 ORIENTATION
 
-Four orientations: N/S/E/W. The tile map and layout positions are defined in one canonical orientation and rotated at construction time. The door face determines clearing direction. Player-sized buildings (stockpile, farm) and solid buildings (gathering hubs) have no orientation.
+Four orientations: N/S/E/W. The tile map and layout positions are defined in one canonical orientation and rotated at placement time. The door face determines clearing direction. Player-sized buildings (stockpile, farm) and solid buildings have no orientation.
 
 PLACEMENT VALIDATION
 
-- All building tiles must be on pathable terrain (grass/dirt) unless a `placement` field overrides (e.g., `placement = "rock"`)
-- Clearing tiles must not overlap another building's wall tiles
-- The tile immediately outside the door must be pathable
-- **Perimeter F tiles** are only allowed on faces that have an impassable-terrain clearing — validation checks which face the tile is on and whether that face has such a clearing (derivable from the `placement` field)
+- All footprint tiles (I/D/X) must be on pathable terrain (grass/dirt) unless the building's `placement` field overrides (e.g., edge buildings with water or rock requirements — see Edge Buildings below)
+- No footprint tile may overlap an existing `building_id ~= nil` (no building overlaps)
+- No footprint tile may fall on a tile where `is_clearing == true` (footprint cannot block another building's clearing)
+- The derived clearing tile must be on a pathable outdoor tile — no rock, no water, no other building's footprint. Clearing-on-clearing overlap is allowed (the new building simply joins the existing clearing claim on that tile).
+- The door tile must be on the perimeter of the footprint (validated on the BuildingConfig, not per placement)
 - **Unit occupancy (P1):** any footprint tile with `target_of_unit ~= nil` or `#tile.unit_ids > 0` is invalid. In P2, units are displaced on placement instead of blocking — see BEHAVIOR.md Construction Work Cycle for the displacement sweep.
-- **Plants (P1):** any footprint tile with `tile.plant_type ~= nil` is invalid (trees and berry bushes both block). In P2, trees become clearable obstructions — the building enters blueprint phase and clearing activities are posted. Berry bush clearing comes online in P3.
+- **Plants (P1):** any footprint tile with `tile.plant_type ~= nil` is invalid. In P2, trees become clearable obstructions — the building enters blueprint phase and clearing activities are posted. Berry bush clearing comes online in P3.
 - **Ground piles (P1):** any footprint tile with `tile.ground_pile_id ~= nil` is invalid. In P2, ground piles become clearable obstructions — the building enters blueprint phase and clearing haul activities are posted.
-- **Solid buildings** (`is_solid = true`) have no door — all tiles are wall. Validation only requires all footprint tiles on pathable terrain.
+- **Solid buildings** have no door — all tiles are X. Only the terrain requirement and the no-overlap rules apply; clearing validation is skipped.
 
-Edge buildings (fishing dock, mines) have row-based terrain constraints relative to orientation. The door face is "front," the opposite edge is "back":
+EDGE BUILDINGS
 
-- Fishing dock: back row must be on water, front row must be on grass/dirt, middle rows can be any terrain. 2-deep water clearing behind back row.
-- Mines (iron, gold): back row must be on rock, front row must be on grass/dirt, middle rows can be any terrain.
+Fishing docks and mines have row-based terrain requirements relative to orientation. The door face is "front," the opposite edge is "back":
 
-Edge buildings can transform impassable tiles (water, rock) into passable interior space when built.
+- **Fishing dock:** back row must be on water; front row must be on grass/dirt; middle rows may be any terrain. Additionally, the 2 tiles immediately behind the back row must also be water (the dock extends out over water).
+- **Mines (iron, gold):** back row must be on rock; front row must be on grass/dirt; middle rows may be any terrain. Additionally, the tile immediately behind the back row must also be rock (the mine extends into rock).
+
+Edge buildings transform impassable terrain (water, rock) under their footprint into passable indoor/door space via the building role override.
 
 CONSTRUCTION PHASES
 
 Buildings progress through three phases: `"blueprint"` → `"constructing"` → `"complete"`.
 
-**Blueprint (P2 only).** The building has been placed but the site has not been cleared. Footprint tiles are impassable to most units, but units with the A* building exemption for this building can path through (see Pathfinding A* Building Exemption). Clearing activities (chop for trees, clear for berry bushes, haul for ground piles) are posted into `posted_activity_ids`. Construction material haul activities are NOT posted during this phase — they post on transition to constructing. The blueprint transitions to constructing when all clearing activities are complete and no units remain on footprint tiles. See BEHAVIOR.md Construction Work Cycle for clearing behavior, activity flow, and unit displacement.
+**Blueprint (P2 only).** The building has been placed but the site has not been cleared. Footprint tiles are impassable to most units, but units with the A* building exemption for this building can path through. Clearing activities (chop for trees, clear for berry bushes, haul for ground piles) are posted into `posted_activity_ids`. Construction material haul activities are NOT posted during this phase — they post on transition to constructing. The blueprint transitions to constructing when all clearing activities are complete and no units remain on footprint tiles. See BEHAVIOR.md Construction Work Cycle for clearing behavior, activity flow, and unit displacement.
 
-**Constructing.** All footprint tiles are impassable. Construction material haul activities and the build activity are posted. Builder delivers materials and builds. See BEHAVIOR.md Construction Work Cycle.
+**Constructing.** All footprint tiles are impassable (with the same exemption semantics as blueprint). Construction material haul activities and the build activity are posted. Builder delivers materials and builds. See BEHAVIOR.md Construction Work Cycle.
 
-**Complete.** Interior F/D tiles become passable. The building is operational.
+**Complete.** Footprint tiles activate their building roles — I and D tiles become pathable per edge connectivity rules, X tiles remain impassable. The clearing tile flag is set. The building is operational.
 
-**P1 behavior:** Buildings are placed instantly as `"complete"` — no construction phase, no `build_cost` consumed, no build activities posted. On placement, footprint tiles are claimed (`tile.building_id` set) and interior F/D tiles are immediately passable. The `build_cost` and `build_ticks` values in BuildingConfig exist for P2 when the construction system comes online. In P2, buildings with clearable obstructions on their footprint enter blueprint phase; buildings on clear sites are placed as `"constructing"`.
+**P1 behavior:** Buildings are placed instantly as `"complete"` — no construction phase, no `build_cost` consumed, no build activities posted. On placement, footprint tiles are claimed (`tile.building_id` and `tile.building_role` set) and the clearing is registered (`building.clearing_tile` set, `tile.is_clearing = true`). The `build_cost` and `build_ticks` values in BuildingConfig exist for P2 when the construction system comes online. In P2, buildings with clearable obstructions on their footprint enter blueprint phase; buildings on clear sites are placed as `"constructing"`.
 
 BUILDINGS WITHOUT TILE MAPS
 
-**Stockpiles:** Open area, every tile is a storage entry in the tile inventory. No walls, no door, no tile map. All tiles are directly accessible.
+**Stockpiles:** Open area, every tile is a storage entry in the tile inventory. No walls, no door, no tile map. All footprint tiles are outdoor — no building_role set — and remain directly accessible. `tile.building_id` is set to associate the tile with the stockpile for storage purposes, but `building_role` remains nil, so the tile participates in outdoor connectivity as usual.
 
 **Farms:** Player-sized open passable area. No wall/floor model. See ECONOMY.md Frost and Farming for per-tile crop state and farm controls. Farms go through the blueprint phase in P2 when obstructions exist on footprint tiles.
 
 SOLID BUILDINGS
 
-Gathering hubs (woodcutter's camp, gatherer's hut, herbalist's hut) are solid structures with `is_solid = true`. Their tile map is all W — no door, no interior, no layout positions. Workers never enter. They path adjacent-to-rect to the building when returning from gathering trips. No clearing is generated for solid buildings.
+Gathering hubs (woodcutter's camp, gatherer's hut, herbalist's hut) are solid structures — their tile_map is entirely X, their layout is empty. There is no door, no indoor, and no clearing. Workers never enter; they path adjacent-to-rect to the building when returning from gathering trips. Solid is not a flag but a property of the tile_map: any building whose tile_map contains no D is solid by construction.
 
 PATHFINDING INTEGRATION
 
-`getTileCost` checks building tiles: if the tile belongs to a completed building and its tile map entry is W, impassable. If F or D, passable at BASE_MOVE_COST. Blueprint tiles and under-construction tiles are impassable unless the A* building exemption applies (see Pathfinding A* Building Exemption).
+Pathfinding uses an edge check rather than a pure tile-cost lookup. A function `getEdgeCost(from_idx, to_idx)` returns the cost of entering the destination tile when the edge is traversable, or `nil` when the edge is blocked. The check is:
+
+1. Resolve `role(from)` and `role(to)` from `tile.terrain`, `tile.building_id`, `tile.building_role`, and `tile.is_clearing`.
+2. Consult the edge connectivity table. For same-building edges, compare `from.building_id == to.building_id`. For the door-clearing edge, look up the door's building and compare `clearing_tile == to_idx`.
+3. If the edge is allowed, return the destination tile's base cost (terrain or building override per Tile Base Cost).
+4. Apply the A* building exemption if set (see A* Building Exemption).
+
+Blueprint and constructing tiles are treated as impassable at step 1 unless the exemption applies.
 
 ## Plant System
 

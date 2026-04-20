@@ -64,6 +64,8 @@ function dev_overlay.draw()
             "plant:       " .. tostring(t.plant_type) .. " / " .. tostring(t.plant_growth),
             "forest_depth:" .. string.format(" %.2f", t.forest_depth),
             "building_id: " .. tostring(t.building_id),
+            "bldg_role:   " .. tostring(t.building_role),
+            "is_clearing: " .. tostring(t.is_clearing),
             "ground_pile: " .. tostring(t.ground_pile_id),
             "target_of:   " .. tostring(t.target_of_unit),
             "unit_ids:    " .. uid_str,

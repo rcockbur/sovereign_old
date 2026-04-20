@@ -650,7 +650,7 @@ local function dropEntitiesToGround(entity_ids, rtype, from_x, from_y)
                 local nx, ny = cx + d[1], cy + d[2]
                 if nx >= 1 and nx <= MAP_WIDTH and ny >= 1 and ny <= MAP_HEIGHT then
                     local nidx = tileIndex(nx, ny)
-                    if visited[nidx] == nil and world.getTileCost(world.tiles[nidx]) ~= nil then
+                    if visited[nidx] == nil and world.getEdgeCost(cur, nidx) ~= nil then
                         visited[nidx] = true
                         queue[#queue + 1] = { nidx, depth + 1 }
                     end

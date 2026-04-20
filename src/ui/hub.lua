@@ -250,6 +250,12 @@ function hub.keypressed(key)
         hub.setMode("placing", { building_type = "stockpile", orientation = nil })
         return true
     end
+    if key == "f4" then
+        local mx, my = love.mouse.getPosition()
+        local tx, ty = screenToTile(mx, my)
+        buildings.placeTilemapBuilding("cottage", tx, ty, "S")
+        return true
+    end
     if hub.mode ~= "normal" then
         if key == "escape" then
             hub.setMode("normal")

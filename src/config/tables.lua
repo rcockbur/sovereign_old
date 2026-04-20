@@ -262,19 +262,18 @@ BuildingConfig = {
     -- Housing
     cottage = {
         category   = "housing",
-        width = 5, height = 4,
+        width = 3, height = 3,
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 6 * TICKS_PER_HOUR,
         tile_map = {
-            "W", "W", "W", "W", "W",
-            "W", "F", "F", "F", "W",
-            "W", "F", "F", "F", "W",
-            "W", "W", "D", "W", "W",
+            "I", "I", "I",
+            "I", "I", "I",
+            "I", "D", "I",
         },
         layout = {
             beds = {
-                { x = 1, y = 1 }, { x = 3, y = 1 },
-                { x = 1, y = 2 }, { x = 3, y = 2 },
+                { x = 0, y = 0 }, { x = 2, y = 0 },
+                { x = 0, y = 1 }, { x = 2, y = 1 },
             },
         },
     },
@@ -305,46 +304,43 @@ BuildingConfig = {
         activity_type   = "farmer",
     },
 
-    -- Hub gathering (solid buildings — all-W tile map, no interior)
+    -- Hub gathering (solid buildings — all-X tile map, no interior)
     woodcutters_camp = {
         category      = "gathering",
-        is_solid      = true,
         width = 2, height = 2,
         build_cost    = { wood = 20 },
         build_ticks   = 4 * TICKS_PER_HOUR,
         max_workers   = 4,
         activity_type = "woodcutter",
         tile_map = {
-            "W", "W",
-            "W", "W",
+            "X", "X",
+            "X", "X",
         },
         layout = {},
     },
     gatherers_hut = {
         category      = "gathering",
-        is_solid      = true,
         width = 2, height = 2,
         build_cost    = { wood = 15 },
         build_ticks   = 4 * TICKS_PER_HOUR,
         max_workers   = 4,
         activity_type = "gatherer",
         tile_map = {
-            "W", "W",
-            "W", "W",
+            "X", "X",
+            "X", "X",
         },
         layout = {},
     },
     herbalists_hut = {
         category      = "gathering",
-        is_solid      = true,
         width = 2, height = 2,
         build_cost    = { wood = 15 },
         build_ticks   = 4 * TICKS_PER_HOUR,
         max_workers   = 4,
         activity_type = "herbalist",
         tile_map = {
-            "W", "W",
-            "W", "W",
+            "X", "X",
+            "X", "X",
         },
         layout = {},
     },
@@ -359,9 +355,9 @@ BuildingConfig = {
         max_workers   = 3,
         activity_type = "fisher",
         tile_map = {
-            "F", "F", "F",
-            "W", "F", "W",
-            "W", "D", "W",
+            "I", "I", "I",
+            "I", "I", "I",
+            "I", "D", "I",
         },
         layout = {
             workstation = { { x = 0, y = 0 }, { x = 1, y = 0 }, { x = 2, y = 0 } },

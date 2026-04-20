@@ -120,7 +120,8 @@ function Unit:moveStep()
     local next_idx  = self.path.tiles[self.path.current]
     local nx, ny    = tileXY(next_idx)
     local next_tile = world.tiles[next_idx]
-    local cost      = world.getTileCost(next_tile)
+    local from_idx  = tileIndex(self.x, self.y)
+    local cost      = world.getEdgeCost(from_idx, next_idx)
     if cost == nil then
         self.path = nil
         return
@@ -282,7 +283,6 @@ end
 
 function units.startMove(unit, goal_idx)
     local goal_tile = world.tiles[goal_idx]
-    if world.getTileCost(goal_tile) == nil then return false end
     if goal_tile.target_of_unit ~= nil then return false end
 
     local old_target_idx = unit.target_tile
@@ -293,7 +293,7 @@ function units.startMove(unit, goal_idx)
         world.tiles[old_target_idx].target_of_unit = nil
     end
 
-    local path = pathfinding.findPath(world.tiles, tileIndex(unit.x, unit.y), goal_idx)
+    local path = pathfinding.findPath(tileIndex(unit.x, unit.y), goal_idx)
     if path == nil then
         goal_tile.target_of_unit = nil
         unit.target_tile          = old_target_idx
@@ -310,7 +310,7 @@ end
 
 function units.startMoveAdjacentToRect(unit, rx, ry, rw, rh)
     local start_idx = tileIndex(unit.x, unit.y)
-    local path = pathfinding.findPathAdjacentToRect(world.tiles, start_idx, rx, ry, rw, rh)
+    local path = pathfinding.findPathAdjacentToRect(start_idx, rx, ry, rw, rh)
     if path == nil then
         return false
     end
@@ -349,7 +349,7 @@ function units.floodFillNearest(unit)
             local nx, ny = cx + d[1], cy + d[2]
             if nx >= 1 and nx <= MAP_WIDTH and ny >= 1 and ny <= MAP_HEIGHT then
                 local nidx = tileIndex(nx, ny)
-                if visited[nidx] == nil and world.getTileCost(world.tiles[nidx]) ~= nil then
+                if visited[nidx] == nil and world.getEdgeCost(cur, nidx) ~= nil then
                     visited[nidx]       = true
                     queue[#queue + 1]   = nidx
                 end

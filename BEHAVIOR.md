@@ -1,5 +1,5 @@
 # Sovereign — BEHAVIOR.md
-*v17 · Unit behavior: tick order, update loops, action system, classes and specialties.*
+*v18 · Unit behavior: tick order, update loops, action system, classes and specialties.*
 
 ## Simulation
 
@@ -377,7 +377,7 @@ All footprint tiles are immediately claimed (`tile.building_id` set) and impassa
 
 1. **If blueprint (P2):** Check for unclaimed clearing activities on this building. If any, claim the highest-priority one and execute the clearing sequence (see above). Repeat until no clearing activities remain.
 2. **If constructing:** Check each `construction.bins` type: `needed = build_cost[type] - bin_contents - bin_reserved_in`. If needed > 0 for any type, path directly to the nearest stockpile with available stock of that type, pick up, deliver to building. If needed == 0 but bins aren't full yet (deliveries in transit), path to building and wait at site (adjacent-to-rect). When all materials are present, begin work action at building. `construction.progress` only advances while bins contain all required materials.
-3. On completion: bin contents are consumed, `construction` is set to nil, `phase` is set to `"complete"`, interior F/D tiles become passable.
+3. On completion: bin contents are consumed, `construction` is set to nil, `phase` is set to `"complete"`, footprint tiles activate their building roles and the clearing is registered (see WORLD.md Construction Phases).
 
 When `build_cost` is empty (stockpiles), the construction sub-table has no bins and progress advances unconditionally — just the builder working through `build_ticks`.
 

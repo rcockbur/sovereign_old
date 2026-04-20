@@ -14,7 +14,8 @@ local function unitScreenPos(unit, ts, half)
     if unit.path ~= nil then
         local next_idx  = unit.path.tiles[unit.path.current]
         local nx, ny    = tileXY(next_idx)
-        local tile_cost = world.getTileCost(world.tiles[next_idx])
+        local from_idx  = tileIndex(unit.x, unit.y)
+        local tile_cost = world.getEdgeCost(from_idx, next_idx)
         if tile_cost ~= nil then
             local dx = math.abs(nx - unit.x)
             local dy = math.abs(ny - unit.y)
