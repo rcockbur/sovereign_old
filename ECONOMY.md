@@ -1,5 +1,5 @@
 # Sovereign — ECONOMY.md
-*v13 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
+*v14 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
 
 ## Resource System
 
@@ -57,16 +57,16 @@ tile_inventory = {
     tile_capacity = STOCKPILE_TILE_CAPACITY,  -- per-tile weight capacity for stacks
     tiles = {},          -- array of tile_entry, one per stockpile tile
     filters = {},        -- per-type filter entries — see Storage Filter System
+    reserved_in = {},    -- type-keyed: amount spoken for by inbound deliveries
+    reserved_out = {},   -- type-keyed: amount spoken for by outbound pickups
 }
 
 tile_entry = {
     contents = {},       -- flat array of entity ids
-    reserved_in = 0,     -- amount spoken for by inbound deliveries at this tile
-    reserved_out = 0,    -- amount spoken for by outbound pickups at this tile
 }
 ```
 
-Items occupy one tile each regardless of weight. The tile_inventory's `filters` apply across all its tiles — filters are container-level, not per-tile.
+Items occupy one tile each regardless of weight. The tile_inventory's `filters` apply across all its tiles — filters are container-level, not per-tile. Reservations are container-level (type-keyed) — the resources module selects a specific tile internally on deposit and withdraw.
 
 **Stack inventory** — flat array of stack entity ids with total weight capacity. Used by: warehouses. Only accepts stackable resources.
 
@@ -260,20 +260,7 @@ HARVEST YIELD
 
 ## Ground Piles
 
-Ground piles are entities that hold resources on map tiles. Created when units drop resources (hard interrupts, death, offloading when no storage has capacity, farmer harvest overflow). Each ground pile sits on one tile. The drop function prefers to spread resource types across separate tiles.
-
-A ground pile holds a flat array of entity ids (stacks and items mixed). No capacity enforcement, no filters. The tile references the ground pile entity via `tile.ground_pile_id`.
-
-```lua
-ground_pile = {
-    container_type = "ground_pile",
-    count_category = "ground",
-    id = 0,
-    x = 0, y = 0,
-    contents = {},       -- flat array of entity ids (stacks and items mixed)
-    reserved_out = 0,    -- amount spoken for by haulers claiming pickup activities
-}
-```
+Ground piles are entities that hold resources on map tiles. Created when units drop resources (hard interrupts, death, offloading when no storage has capacity, farmer harvest overflow). Each ground pile sits on one tile. The drop function prefers to spread resource types across separate tiles. See TABLES.md ground_pile for the entity data structure.
 
 Ground piles self-post one haul activity per resource type they contain. When a hauler picks up all entities of a given type, the corresponding activity is removed. When the pile is fully emptied, it is destroyed (removed from `world.ground_piles` and registry, `tile.ground_pile_id` cleared). If no valid storage has capacity, the activities still post but won't be claimed until space opens up — the pile persists on the ground indefinitely. Ground pile haul activities use `destination_id = nil` — the hauler resolves the nearest valid storage with capacity at claim time. If no storage has capacity, the activity is skipped.
 

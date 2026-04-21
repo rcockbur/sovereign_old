@@ -5,7 +5,7 @@
 
 Top-down orthographic. Fixed orientation — no rotation.
 
-Zoom range: `ZOOM_MIN` (0.5) to `ZOOM_MAX` (2.0). Pan via edge scroll or keyboard. Tile-to-screen conversion is a direct scale — no isometric projection math.
+Zoom range: `ZOOM_MIN` (0.5) to `ZOOM_MAX` (2.0). Pan via arrow keys or middle-mouse drag. Zoom via scroll wheel. Tile-to-screen conversion is a direct scale — no isometric projection math.
 
 ## Architecture
 
@@ -31,6 +31,8 @@ INPUT ROUTING
 `ui.lua` resolves which layer owns the mouse once per frame during `update`, based on mouse position and panel visibility. The result is stored as `ui.active_layer`. Clicks dispatch to the owning layer's handler via early return. Draw code reads `active_layer` to decide whether to show hover states. The game world only processes input or draws hover effects when no UI layer claimed the mouse.
 
 Priority chain (first match wins): management overlay (if open) → left panel (if open) → action bar → command bar → right panel → game world.
+
+Panels swallow all clicks within their bounds, including empty regions, to prevent misclicks from reaching the world. A click that lands on a panel but doesn't hit an interactive element produces no effect (no fall-through to world selection).
 
 DRAW ORDER
 
@@ -182,9 +184,11 @@ Appears when an entity is selected. Closes on Escape or clicking empty ground.
 
 P1 IMPLEMENTATION (DEBUG DUMP)
 
-A `tableToString(entity)` helper recursively formats any entity table into labeled rows of text with indentation for nested tables. Selecting a unit dumps the unit table. Selecting a building dumps the building table. Selecting a map tile dumps `world.tiles[idx]`. Selecting a ground pile dumps the ground pile entity.
+A `tableToString(entity)` helper recursively formats any entity table into labeled rows of text with indentation for nested tables. Selecting a building dumps the building table. Selecting a map tile dumps `world.tiles[idx]`. Selecting a ground pile dumps the ground pile entity.
 
-The dump refreshes live so the player sees values changing in real time — need drain, action progress, carrying contents.
+The unit display is the exception — it uses a curated layout with sections for position, current action, needs, vitals, carrying, work day, and housing. The full table dump was unusable for live simulation verification because the output overflowed the window. The curated layout is the bare minimum to read need drain, action progress, and carrying contents in real time. A broader UI pass post-P1 will replace the remaining tableToString panels.
+
+The dump (and the curated unit display) refresh live so the player sees values changing in real time — need drain, action progress, carrying contents.
 
 As the game matures, per-entity-type panels with designed layouts replace the debug dump. The left panel also hosts entity configuration controls (stockpile filters, production orders, farm controls, specialty assignment) as they come online in Phase 2.
 

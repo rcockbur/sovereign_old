@@ -392,6 +392,8 @@ When `plant_growth == 0`, `plant_type` must be `nil`. When `plant_growth > 0`, `
 
 **Growth data:** `world.growing_plant_data[tileIndex(x, y)] = planted_tick`. Stages 1–2 only. Removed on promotion to mature.
 
+**Stage transitions:** All plant stage changes go through `world.setPlantStage(tile_idx, stage)`, which keeps `tile.plant_growth` and `world.growing_plant_data` in sync atomically. Stages 1 and 2 register a `planted_tick`; stages 0 and 3 clear it. Plant type changes (placement on map gen, removal on chop/clear) are orthogonal — set `tile.plant_type` separately at the call site.
+
 **Safety:** No spread adjacent to buildings. No spread onto blueprint tiles (`tile.building_id` set).
 
 **Performance note:** The cursor scan touches every tile including mature plants. At high mature plant density (30,000+ tiles), the per-tick cost is still low (just a growth check and a `spread_chance` random roll per mature tile), but if profiling shows issues, a mature plant list could replace the full-tile scan.

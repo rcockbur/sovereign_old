@@ -1,5 +1,5 @@
 # Sovereign — BRAINSTORMING.md
-*v3 · Loosely defined ideas, deferred systems, and content slated for later development. Upload to Claude.ai sessions when relevant.*
+*v3 · Loosely defined ideas, deferred systems, and content slated for later development.*
 
 ## Creatures and Encounters
 

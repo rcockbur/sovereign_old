@@ -116,7 +116,7 @@ The forest is dense and resource-rich — a wall the player carves into.
 
 Forest resources are tiered by depth. Basic materials are available everywhere, rarer materials require venturing deeper. Some late-game systems, including magic, are gated behind deep resources.
 
-The forest is home to animals, hostile human factions, ruins, and Fey. The game begins feeling entirely grounded — supernatural elements escalate gradually. See _BRAINSTORMING.md for creature lists and encounter concepts.
+The forest is home to animals, hostile human factions, ruins, and Fey. The game begins feeling entirely grounded — supernatural elements escalate gradually. See BRAINSTORMING.md for creature lists and encounter concepts.
 
 See WORLD.md for forest coverage, plant types, growth/spread mechanics, and movement costs.
 
@@ -142,7 +142,7 @@ Magic is a late-game system that emerges from existing unit progression. Rare, s
 
 **Divine progression:** Priest/Bishop levels priesthood skill. Divine magic unlocks through the Vision — a dramatic narrative event at a Bishop skill threshold. All divine spells unlock simultaneously. The Bishop gains the Blessed trait.
 
-*Specific spells, mana rates, tech tree, and scripture mechanics deferred to _BRAINSTORMING.md.*
+*Specific spells, mana rates, tech tree, and scripture mechanics deferred to BRAINSTORMING.md.*
 
 See TABLES.md for magic data structure.
 

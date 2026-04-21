@@ -1,5 +1,5 @@
 # Sovereign — TABLES.md
-*v21 · Reference data: game entity data structures, config tables, and production chains.*
+*v22 · Reference data: game entity data structures, config tables, and production chains.*
 
 ## Data Structures
 
@@ -114,11 +114,17 @@ function unit:carryableAmount(type)
     local remaining_weight = CARRY_WEIGHT_MAX - resources.countWeight(self.carrying)
     return math.floor(remaining_weight / ResourceConfig[type].weight)
 end
+
+function unit:recalcMoveSpeed()
+    -- Updates self.move_speed from current carry weight and strength.
+    -- Called after any change to self.carrying (carry, drop, deposit, withdraw).
+    -- Formula in WORLD.md Movement Speed.
+end
 ```
 
 **Attributes** use three tables. `genetic_attributes` are derived from parents at birth and represent the growth target — capped at `genetic_attribute_max` (7), never change after birth. `base_attributes` track current genetic growth, starting at `{1,1,1}` and growing toward `genetic_attributes` by adulthood. `acquired_attributes` are environmental bonuses, capped at `acquired_attribute_max` (3) per attribute. Effective attribute = `unit:getAttribute(key)` = `base + acquired`. Max effective value is 10. Parent derivation formula and childhood growth curve are pending design (Phase 5).
 
-**Equipment:** Units wear individual items (tools, clothing). Each equipped slot holds an item entity id referencing a first-class item entity in the registry. Units self-fetch equipment from the nearest stockpile or barn when missing a wanted item, preferring higher-quality variants (e.g., steel_tools over iron_tools — ranking mechanism pending, see DESIGN.md Phase 2). See BEHAVIOR.md Equipment Wants. Items degrade over time — see ECONOMY.md Item for drain rules. When durability reaches 0, the item is destroyed (resource counts updated via `equipped` category) and the unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning. Additional equipped slots (jewelry, weapon, armor) arrive in later phases.
+**Equipment:** Units wear individual items (tools, clothing). Each equipped slot holds an item entity id referencing a first-class item entity in the registry. Units self-fetch equipment from the nearest stockpile or barn when missing a wanted item, preferring higher-quality variants (e.g., steel_tools over iron_tools — ranking mechanism pending). See BEHAVIOR.md Equipment Wants. Items degrade over time — see ECONOMY.md Item for drain rules. When durability reaches 0, the item is destroyed (resource counts updated via `equipped` category) and the unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning. Additional equipped slots (jewelry, weapon, armor) arrive in later phases.
 
 MEMORY (DEAD UNIT)
 
@@ -152,6 +158,10 @@ tile = {
     claimed_by = nil,        -- unit_id claiming resource for gathering
     target_of_unit = nil,    -- unit_id whose target_tile is this tile, or nil
     unit_ids = {},           -- unit ids currently on this tile (maintained on move, spawn, death)
+    designation = nil,       -- nil | "chop" | "gather". Set when player marks the tile for collection.
+    designation_activity_id = nil,  -- activity id paired with the designation, or nil. Maintained
+                             --   alongside designation on post and cancellation. Lets the renderer
+                             --   and cancel-designation drag look up the activity in O(1).
 }
 ```
 
@@ -173,8 +183,19 @@ activity = {
     -- Hauling activity fields (nil for regular)
     resource_type = nil,
     source_id = nil,         -- building id, ground pile id, or nil (unit is carrying)
-    destination_id = nil,    -- building id
+    destination_id = nil,    -- building id where the unit will deposit. Set on post for haul activities;
+                             --   set at runtime by work-cycle handlers (woodcutter, gatherer) when they
+                             --   choose a deposit target. Persists across phases until completion or
+                             --   abandonment.
     is_private = false,      -- true for self-posted activities (self-fetch, self-deposit, merchant delivery)
+
+    -- Handler-internal state (set at runtime by activity handlers)
+    phase = nil,             -- string or nil. Tracks the activity's internal state machine.
+                             --   Values are activity-type-specific — see the handlers in
+                             --   simulation/activities.lua.
+    reserved_amount = nil,   -- number or nil. Set by handlers that interact with the reservation
+                             --   system. Tracks the amount reserved in the destination container so
+                             --   cleanup can release it on activity completion, abandonment, or death.
 }
 ```
 
@@ -233,7 +254,7 @@ building = {
     posted_activity_ids = {},     -- every activity this building posted (operational, build, construction haul)
                              -- used for staffing check (#posted_activity_ids < worker_limit) and deletion cleanup
 
-    -- Workforce (non-housing buildings only)
+    -- Workforce (work-capable categories only: farming, gathering, extraction, processing, service)
     worker_limit = 0,        -- player-adjustable; capped at max_workers from BuildingConfig
 
     -- Production (processing buildings only)
@@ -273,11 +294,11 @@ building = {
 }
 ```
 
-`housing.bins` is built dynamically from HousingBinConfig at construction time. Adding a food type to HousingBinConfig automatically makes it available in all housing buildings. Equipment (tools, clothing) is not stored in housing — units self-fetch from storage buildings. See BEHAVIOR.md Equipment Wants.
+`housing.bins` is one bin per food type from HousingBinConfig. Equipment (tools, clothing) is not stored in housing — units self-fetch from storage buildings. See BEHAVIOR.md Equipment Wants.
 
-`production.input_bins` is built dynamically at construction from the building's recipes — collect all unique input resource types across all recipes, create one bin per type with capacity from BuildingConfig.
+`production.input_bins` is one bin per unique input resource type across the building's recipes, with capacity from BuildingConfig.
 
-`market.last_delivered` is built dynamically from MerchantConfig food type keys at construction time. Tracks the tick of the last completed delivery run per food type.
+`market.last_delivered` is keyed by MerchantConfig food types and tracks the tick of the last completed delivery run per food type.
 
 **`worker_limit` vs `max_workers`:** `max_workers` in BuildingConfig is the design-time ceiling. `worker_limit` on the runtime building is the player-adjustable value, defaulting to `max_workers` on construction. The player can lower `worker_limit` but never raise it above `max_workers`.
 
@@ -295,7 +316,7 @@ building = {
 | processing | `production` |
 | service | building-specific fields (`max_students`, `market`, etc.) |
 
-Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `phase`, `is_deleted`, `posted_activity_ids`. Constructing: `construction` sub-table. Non-housing buildings additionally have `worker_limit`. Player-sized buildings and solid buildings have no `orientation`.
+Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `phase`, `is_deleted`, `posted_activity_ids`. Constructing: `construction` sub-table. Buildings with workers (categories: farming, gathering, extraction, processing, service) additionally have `worker_limit`. Storage and housing buildings have no `worker_limit` — workers don't *work at* a stockpile or a cottage. Player-sized buildings and solid buildings have no `orientation`.
 
 **Construction:** Building placement creates a building entity with `phase = "complete"` (P1, instant placement — no construction sub-table) or `phase = "constructing"` / `"blueprint"` (P2, when the construction system comes online) and populates a `construction` sub-table. See BEHAVIOR.md Construction Work Cycle for the full behavioral sequence.
 
@@ -307,9 +328,24 @@ Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `he
 
 **Crop change:** Changing crop destroys planted tiles. See ECONOMY.md Farm Controls.
 
-**Extraction:** No depletion. See BEHAVIOR.md Extraction Work Cycle.
+**Extraction:** No depletion. See BEHAVIOR.md Gathering Work Cycle (extraction variant).
 
 **Storage filter system and container type constraints** (stockpile/warehouse/barn): see ECONOMY.md Storage Filter System and Containers.
+
+GROUND PILE
+
+```lua
+ground_pile = {
+    container_type = "ground_pile",
+    count_category = "ground",
+    id = 0,
+    x = 0, y = 0,
+    contents = {},       -- flat array of entity ids (stacks and items mixed)
+    reserved_out = 0,    -- amount spoken for by haulers claiming pickup activities
+}
+```
+
+Holds a flat array of entity ids (stacks and items mixed). No capacity enforcement, no filters. The tile references the ground pile entity via `tile.ground_pile_id`. See ECONOMY.md Ground Piles for creation, self-posting, and the ground drop search algorithm.
 
 WORLD
 
@@ -349,7 +385,7 @@ world = {
         speed = Speed.NORMAL,
         is_paused = false,
         accumulator = 0,
-        tick = 0,
+        tick = 6 * TICKS_PER_HOUR,    -- 6 AM start
         game_minute = 0,
         game_hour = 6,
         game_day = 1,
@@ -1048,6 +1084,10 @@ Keybinds = {
     speed_4            = "4",
     speed_5            = "5",
     speed_6            = "6",
+    pan_up             = "up",
+    pan_down           = "down",
+    pan_left           = "left",
+    pan_right          = "right",
     designate_chop     = "a",
     designate_gather   = "s",
     cancel_designation = "x",

@@ -1,21 +1,32 @@
 # FILES.md — Document System Reference
-*v7*
+*v9*
 
 ## Documents
 
-**CLAUDE.md** — Technical hub. Conventions, constants, architecture, dev tools, module ownership, serialization. Contains a routing table that maps technical topics to the domain files below. Always auto-loaded by Claude Code.
+Project files split into two tiers based on visibility.
 
-**ROADMAP.md** — Project planning. Development phase scope and milestones, implementation state, pending implementation tasks, and implementation decisions. Claude Code reads this for milestone specs and updates implementation state, pending implementation tasks, and implementation decisions here.
+VISIBLE TO CLAUDE CODE
 
-**BEHAVIOR.md, ECONOMY.md, WORLD.md, TABLES.md** — Simulation files. Technical references for the game's model — everything that would exist in a headless run. See CLAUDE.md's technical routing table for what each file covers and where new content belongs.
+These files are attached to the Claude project and not in `.claudeignore`. Claude Code reads CLAUDE.md at session start; CLAUDE.md routes among them.
 
-**UI.md** — UI file. Technical reference for the player interface — camera, input, layout, panels, selection, notifications. Everything that exists only because a player is watching and interacting.
+- **CLAUDE.md** — Technical hub and routing table for all Tier 1 files. Read this for what's where.
+- **ROADMAP.md** — Project planning. (See CLAUDE.md.)
+- **BEHAVIOR.md, ECONOMY.md, WORLD.md, TABLES.md** — Simulation files. (See CLAUDE.md.)
+- **UI.md** — UI file. (See CLAUDE.md.)
+- **CODE_AUDIT.md** — Code audit reference. Loaded by Claude Code only when an audit prompt directs. (See CLAUDE.md.)
 
-**DESIGN.md** — Player-facing design intent: pillars, setting, feature descriptions, the "why" behind gameplay decisions. No mechanical detail — cross-references the technical files for all specifics. Phase overview only — full phase scope and pending items live in ROADMAP.md.
+VISIBLE ONLY IN DESIGN SESSIONS
 
-**_BRAINSTORMING.md** — Loosely defined ideas, deferred systems, and speculative content. Not attached to the Claude project. Upload manually when the session topic requires it.
+These files are attached to the Claude project but excluded from Claude Code via `.claudeignore`. They appear here in design sessions but never in implementation work.
 
-All documents except _BRAINSTORMING.md live at the repo root and are attached to the Claude.ai project.
+- **FILES.md** — This file. Read at the start of every design session for current project file structure and routing. Otherwise inert.
+- **DESIGN.md** — Player-facing design intent: pillars, setting, feature descriptions, the "why" behind gameplay decisions. Consult freely for any discussion of design intent, player experience, or topics in its design routing table. Cross-references the technical files for all mechanical specifics.
+- **BRAINSTORMING.md** — Loosely defined ideas, deferred systems, and speculative content. Do not reference unless the user explicitly mentions brainstorming, speculative ideas, or asks about deferred designs. Speculative content may contradict the canonical files; the canonical files always win.
+- **CODE_AUDIT_PROMPTS.md** — Copy-paste prompts the user pastes into Claude Code to trigger code audits. Not relevant to design or implementation discussion. Reference only if the user asks about the audit workflow itself.
+
+ADDING A NEW FILE
+
+When a new file enters the project, decide its tier deliberately. Tier 1 if Claude Code needs it during implementation; Tier 2 if it's only useful in design sessions or as user-facing tooling. Update CLAUDE.md's routing table for Tier 1 additions; update FILES.md for Tier 2 additions. Do not duplicate routing across the two files.
 
 ## Structure and Formatting
 
@@ -58,7 +69,7 @@ This table defines what DESIGN.md owns versus what the technical files own, per 
 | Needs | Three needs as pressure to stop working, starvation as failure mode | Drain rates, thresholds, interrupt firing conditions, availability gating |
 | Mood | Composite score concept, what drives it, productivity/deviancy consequences | Modifier values, threshold config, recalculation rules, food variety formula |
 | Health | Injury/illness/malnourishment as threats, death at 0 | Damage rates, recovery rates, illness config |
-| Economy | Production chain rationale, food fungibility, storage progression, storage filters as player tool, resource collection methods (designation vs building-based) | Resource entities, containers, reservations, resource counts, unit work cycles, self-fetch/deposit |
+| Economy | Production chain rationale, food fungibility, storage progression, storage filters as player tool | Resource entities, containers, reservations, resource counts, unit work cycles, self-fetch/deposit |
 | Designation | Bootstrap role, player's first tool, relationship to building-based gathering | Activity posting, tile claiming, work cycle (BEHAVIOR.md), UI interaction (UI.md) |
 | Farming | Crop risk/reward tradeoffs, seasonal personality, harvest timing as player agency | Per-tile crop state, frost mechanics, farm controls, farm activity posting, maturity formula |
 | Buildings | Interior spaces, rotation, housing types, construction phases as player experience, site clearing, deletion consequences | Tile maps, layout positions, clearing, placement validation, construction phases, A* building exemption, pathfinding integration, site clearing activities, unit displacement, deletion cleanup sequence |
@@ -93,6 +104,8 @@ After a design session, update the documents that changed:
 4. **Verify.** Scan DESIGN.md for sentences that describe behavior rules, state transitions, trigger conditions, data flow, or that name specific UI elements or input actions. Move or delete.
 
 ## Audit Directive
+
+This section covers **document audits** — checking the spec docs themselves for boundary violations, redundancy, and inconsistency. For **code audits** (checking the codebase against the spec), see CODE_AUDIT.md.
 
 Do NOT reference Claude's memories of past sessions — memories may be outdated. The documents are the sole source of truth.
 

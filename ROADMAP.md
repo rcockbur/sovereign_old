@@ -1,15 +1,16 @@
 # Sovereign — ROADMAP.md
-*v4 · Project planning: phase scope, pending design items, implementation milestones, decisions, and tasks.*
+*v5 · Project planning: phase scope, pending design items, implementation milestones, decisions, and tasks.*
 
 ## Implementation State
 
-Project is implemented up to and including p1m17b.
+Project is implemented up to and including p1m17. Audit completed against p1m01–p1m17; fix queue pending.
 
 ## Pending Implementation Tasks
 
 Action-oriented record of placeholder code, forward dependencies, and cleanup obligations. Read at the start of every session. Format and resolution rules: see CLAUDE.md TEMP MARKERS. Resolved entries are removed as part of the resolving change.
 
-*(none currently)*
+CLEANUP OBLIGATIONS
+- TEMP(stockpile_placement_key) — Stockpile placement uses hardcoded `'b'` debug key in `hub.lua`. Replace with action bar button when UI work lands. Expected: post-P1 UI pass.
 
 ## Implementation Decisions
 
@@ -18,6 +19,9 @@ Permanent record of decisions made in spec gaps that weren't promoted to the des
 **p1m02**
 - Switched log output from `io.open` to `love.filesystem` — `io.popen` on Windows caused a 5-second startup hang. Logs write to `Roaming/LOVE/sovereign/logs/`.
 - `t.identity = "sovereign"` added to `conf.lua` to name the save directory correctly.
+
+**p1m07**
+- Curated unit panel layout used in left panel instead of `tableToString`. Rationale: dump output overflowed the window during testing, making simulation verification impractical. Curated sections (position, action, needs, vitals, carrying, work day, housing) are the bare minimum for now; broader UI pass planned post-P1.
 
 ## Phase 1 Milestones
 
@@ -72,7 +76,7 @@ Verify: Select a unit, right-click a distant tile → unit walks there following
 
 **p1m10 — Time controls + dev overlay** (S)
 `ui/dev_overlay.lua` toggled with F3. Stats bar: FPS, game_time (day/season/year), current speed, TPS (achieved/target with percentage), unit/building/activity/ground_pile counts. Tile inspector on hover: coordinates, terrain, plant info, building_id, unit_ids, target_of_unit, ground_pile_id. Log tail: last ~10 messages. HUD time display showing current date/time and speed indicator (visible without F3).
-Docs: CLAUDE.md § Developer Overlay, TPS Tracking. UI.md § Time display.
+Docs: CLAUDE.md § Developer Overlay, TPS Tracking. UI.md § Time and Speed.
 Verify: F3 shows overlay. Hover tiles → see terrain data. Speed changes reflected in TPS. Tile with a unit shows unit_id. Time display shows the in-game date advancing.
 
 **p1m11 — Simulation loop + idle action** (S)
@@ -87,7 +91,7 @@ Verify: Enter placement mode, drag a 4×3 area on grass → stockpile appears. C
 
 **p1m13 — Resources + stockpile storage** (M)
 `simulation/resources.lua` module. Stack entity (id, type, amount). Tile inventory container on stockpiles (one tile_entry per tile, contents array, `reserved_in`/`reserved_out`). Core API: `resources.deposit()`, `resources.withdraw()`, `resources.getStock()`, `resources.getAvailableStock()`, `resources.getAvailableCapacity()`, `resources.accepts()`, `resources.countWeight()`. `world.resource_counts` with category tallies (storage, carrying, ground). `resources.rebuildCounts()`. `resources.carryResource()` and `resources.carryEntity()` for unit carrying. `resources.withdrawFromCarrying()`.
-Docs: ECONOMY.md § Resource System (stacks), Containers (tile inventory), Reservation System, Resources Module API, Resource Counts. TABLES.md § ResourceConfig (wood, berries, fish).
+Docs: ECONOMY.md § Resource System (stacks), Containers (tile inventory), Reservation System, Resources Module, Resource Counts. TABLES.md § ResourceConfig (wood, berries, fish).
 Verify: Write tests — deposit wood stack to stockpile tile, withdraw partial amount (splits stack), capacity enforcement, reservation arithmetic (available = stock - reserved_out), `rebuildCounts` matches running tallies. Manually deposit resources via debug command → see them in stockpile debug dump.
 
 **p1m14 — Activity system** (M)
@@ -97,22 +101,22 @@ Verify: Manually post an activity via debug command. Observe an idle unit claim 
 
 **p1m15 — Chop designation + tree felling** (M)
 Designation interaction mode: A enters chop designation mode. Click-drag to designate tiles. Each designated tree tile gets a `tile.designation = "chop"` marker and a posted chop activity. Cancel designation mode (X) removes designations and their activities. Visual indicator on designated tiles. Chop work cycle: unit claims chop activity → paths adjacent-to-rect (1×1) to tree → work action (duration from PlantConfig) → tree removed (`plant_type = nil`, `plant_growth = 0`) → wood granted to `unit.carrying` via `resources.carryResource()` → check for more designated trees within reach → if carrying full or no more trees, self-deposit to nearest stockpile. Designation consumed on completion.
-Docs: BEHAVIOR.md § Designation work cycle (chop). WORLD.md § Plant System (harvest). TABLES.md § PlantConfig (tree), ActivityTypeConfig (chop). UI.md § Designation buttons. ECONOMY.md § Resources Module API (carryResource).
+Docs: BEHAVIOR.md § Gathering Work Cycle (designation variant). WORLD.md § Plant System (harvest). TABLES.md § PlantConfig (tree), ActivityTypeConfig (woodcutter). UI.md § Designation buttons. ECONOMY.md § Resources Module (carryResource).
 Verify: Designate 5 trees. Units claim chop activities, walk to trees, chop them (trees disappear), carry wood, deposit at stockpile. Select stockpile → see wood stacks in storage. Designate more trees than units → units chain through them. Cancel a designation → activity removed, tree unaffected.
 
 **p1m16 — Hauling + ground piles** (M)
 Ground pile entity (id, x, y, contents array, reserved_out). Ground drop search algorithm (same-type merge within radius, fallback to empty tile, last resort = current tile). When a unit drops resources (no storage capacity), a ground pile is created via ground drop search. Ground piles self-post one haul activity per resource type. Haul work cycle: claim haul activity → path to ground pile → pick up → path to nearest stockpile with capacity → deposit. Offloading: if a unit becomes idle while carrying, self-deposit to nearest storage; if no capacity, ground drop. Ground pile rendering (small colored squares on tiles). Ground pile destroyed when emptied.
-Docs: ECONOMY.md § Ground Piles, Ground Drop Search. BEHAVIOR.md § Offloading, Hauling. TABLES.md § ground_pile.
+Docs: ECONOMY.md § Ground Piles, Ground Drop Search. BEHAVIOR.md § Offloading. TABLES.md § activity (haul fields), § ground_pile.
 Verify: Fill a stockpile completely. Designate a tree chop → unit chops, can't deposit, drops wood as ground pile. Ground pile visible on map. Another idle unit claims the haul activity and delivers to a different stockpile (or the pile persists if no space anywhere). Select ground pile → see contents in debug dump.
 
 **p1m17 — Gather designation + berry harvesting** (S)
 Gather designation mode (S): click-drag to designate berry bush tiles. Same pattern as chop but for berry bushes. Gather work cycle: path adjacent-to-rect → work action (duration from PlantConfig) → bush resets to growth stage 1 (regrowth, not removal) → berries granted to carrying → chain or deposit. Berries are a food type with `nutrition` value in ResourceConfig.
-Docs: BEHAVIOR.md § Designation work cycle (gather). WORLD.md § Plant System (harvest — bush regrowth). TABLES.md § PlantConfig (berry_bush), ResourceConfig (berries).
+Docs: BEHAVIOR.md § Gathering Work Cycle (designation variant). WORLD.md § Plant System (harvest — bush regrowth). TABLES.md § PlantConfig (berry_bush), ResourceConfig (berries).
 Verify: Designate berry bushes. Units gather berries, bushes visually shrink (stage 1). Berries deposited at stockpile. Bush regrows over time (see p1m25). Berries show up in resource counts.
 
 **p1m17b — Building pathing model refactor** (M)
 Replace the wall-ring building model with edge-based connectivity. New tile fields: `building_role` (nil | "indoor" | "door" | "impassable"), `is_clearing` (bool). New building field: `clearing_tile` (flat tile index, derived at placement from door position and orientation). Tile_map symbols migrate from `W/F/D` to `I/D/X`. A\* rewritten to evaluate edges via `getEdgeCost(from_idx, to_idx)` checking the connectivity table: indoor↔indoor and indoor↔door require same `building_id`; door↔clearing requires `clearing_tile` match on the door's building; clearing↔outdoor, clearing↔clearing, and outdoor↔outdoor are unconditional. Diagonal corner-clip prevention now falls out of the edge rules rather than a tile-passability check. Placement validation updated: footprint cannot overlap existing `building_id`, cannot fall on existing `is_clearing`, derived clearing must land on pathable outdoor. `is_solid` flag dropped — solidity is now a property of the tile_map (no D → solid). Config validation updated to match new invariants. Migrate existing BuildingConfig entries (cottage, fishing_dock, woodcutters_camp, gatherers_hut, herbalists_hut) to I/D/X and update their dimensions where footprint shrinks. Rendering: walls drawn as outlines between indoor and outdoor tiles, not as grid entities.
-Docs: WORLD.md § Pathfinding (edge connectivity, A\* building exemption, pathfinding integration), Building Layout (tile types, tile map, clearing, placement validation, construction phases, solid buildings). TABLES.md § tile, building, BuildingConfig. CLAUDE.md § Constants, Config Validation. BEHAVIOR.md § Building Construction Work Cycle (completion step).
+Docs: WORLD.md § Pathfinding (edge connectivity, A\* building exemption, pathfinding integration), Building Layout (tile types, tile map, clearing, placement validation, construction phases, solid buildings). TABLES.md § tile, building, BuildingConfig. CLAUDE.md § Constants, Config Validation. BEHAVIOR.md § Construction Work Cycle (completion step).
 Verify: Existing playable scope (chop, gather, haul, spawn) works unchanged. Dev-spawn a cottage — units path in through the door, cannot enter through walls, diagonal clip through doorway blocked. Dev-spawn two cottages face-to-face with 1 tile between — both buildings' clearings register on the shared tile, units walk past freely. Dev-spawn a fishing dock — unit paths across deck to workstation over water. Dev-spawn a solid building (woodcutter's camp) — units cannot path onto any footprint tile, path adjacent-to-rect instead. Delete a building — tiles return to terrain-based pathing, shared clearing tiles stay flagged if another building still claims them. Run existing pathfinding tests — they pass with the new edge-based `getEdgeCost`.
 
 **p1m18 — Energy + sleep** (M)
@@ -127,22 +131,22 @@ Verify: Place a cottage. Units get assigned homes (debug dump shows `home_id`). 
 
 **p1m20 — Gatherer's hut** (M)
 Gatherer's hut building (solid — tile map is all X, no door, no interior). Placement mode (temporary debug key). Building-based gathering work cycle: building posts activities gated on nearby mature berry bush count. Worker claims activity → paths to hub (adjacent-to-rect) → scans for nearest valid berry bush from building position → claims tile → paths to bush → harvests → chains (scan from unit position) or deposits when full → returns to hub → repeats. Activity posting limited by `max_workers` and available targets.
-Docs: BEHAVIOR.md § Building-based work cycle (gathering). WORLD.md § Solid Buildings. TABLES.md § BuildingConfig (gatherers_hut), ActivityTypeConfig (gatherer).
+Docs: BEHAVIOR.md § Gathering Work Cycle (building-based variant). WORLD.md § Solid Buildings. TABLES.md § BuildingConfig (gatherers_hut), ActivityTypeConfig (gatherer).
 Verify: Place gatherer's hut near berry bushes. Workers automatically gather berries in a loop without player designation. Workers return to hub between trips. No workers dispatched when no mature bushes exist. Multiple huts work independently.
 
 **p1m21 — Woodcutter's camp** (S)
 Woodcutter's camp building (solid). Placement mode (temporary debug key). Same hub → resource → storage pattern as gatherer's hut but for trees. Chop work cycle from hub: scan for mature trees from building position, chop, carry wood, deposit, return to hub.
-Docs: BEHAVIOR.md § Building-based work cycle (gathering — same pattern). TABLES.md § BuildingConfig (woodcutters_camp), ActivityTypeConfig (woodcutter).
+Docs: BEHAVIOR.md § Gathering Work Cycle (building-based variant). TABLES.md § BuildingConfig (woodcutters_camp), ActivityTypeConfig (woodcutter).
 Verify: Place woodcutter's camp near trees. Workers chop trees and deposit wood at stockpile automatically. Trees are permanently removed (no regrowth). Camp stops posting activities when no trees in range.
 
 **p1m22 — Fishing dock** (M)
 Fishing dock building (edge building: back row on water, front row on grass). Placement validation: back row must be water, front row must be grass/dirt. Tile map with water-facing work area. Extraction work cycle: worker stays at building, executes work action (stationary), fish granted to carrying, deposits when full, returns. Fish resource type with nutrition value.
-Docs: WORLD.md § Building Layout (edge buildings, door face). BEHAVIOR.md § Extraction work cycle. TABLES.md § BuildingConfig (fishing_dock), ActivityTypeConfig (fisher), ResourceConfig (fish).
+Docs: WORLD.md § Building Layout (edge buildings, door face). BEHAVIOR.md § Gathering Work Cycle (extraction variant). TABLES.md § BuildingConfig (fishing_dock), ActivityTypeConfig (fisher), ResourceConfig (fish).
 Verify: Place fishing dock with back on water, front on land. Rejects placement if water requirement not met. Worker produces fish in a loop. Fish deposited at stockpile. Fish visible in resource counts as food.
 
 **p1m23 — Satiation + eating** (M)
 Satiation drain in per-hash loop step 1. Satiation interrupts (soft at 75, hard at 15) — availability-gated: only fires if food exists in storage (check `resource_counts.storage` for any food type). Hard interrupt: drop, release, post private eat activity. Soft interrupt: same deferred/direct pattern as energy. Eating work cycle: if `home_id` set, travel home, consume from housing bins (consumption loop: eat one item, check satiation, repeat). Food selection prefers least-recently-eaten type (`unit.last_ate`). Home food self-fetch: if home bins empty, haul food from nearest stockpile to home bin, then eat. Homeless eating: eat from nearest stockpile directly. `secondary_haul_activity_id` for food reservation during travel.
-Docs: BEHAVIOR.md § Need Interrupts (satiation), Eating Behavior, Home Food Self-Fetch, Homeless Eating, Eating Work Cycle. TABLES.md § NeedsConfig (satiation), ResourceConfig (nutrition values), HousingBinConfig. ECONOMY.md § Resources Module API.
+Docs: BEHAVIOR.md § Need Interrupts (satiation), Eating Behavior, Home Food Self-Fetch, Homeless Eating, Eating Work Cycle. TABLES.md § NeedsConfig (satiation), ResourceConfig (nutrition values), HousingBinConfig. ECONOMY.md § Resources Module.
 Verify: Units get hungry and eat. With a cottage, units walk home and eat from home bins. Home runs out → unit fetches food from stockpile to home. No cottage → unit eats directly from stockpile. No food anywhere → satiation drains to 0 (no interrupt fires). `last_ate` tracks food types. Food variety rotation visible in debug dump.
 
 **p1m24 — Health + starvation + death** (M)
@@ -213,7 +217,7 @@ Development is organized into twelve phases. Each phase produces a qualitatively
 - Herbalist's hut — deferred from Phase 1; herbs have no consumer until physician exists in Phase 4
 - Tavern — barkeep stocking schedule, patron capacity, beer consumption flow, diminishing returns formula for recreation recovery
 - Apothecary mechanics — herb consumption, patient detection, physician travel logic
-- Trait config — mechanical values for Crippled (see _BRAINSTORMING.md for Touched, Changeling)
+- Trait config — mechanical values for Crippled (see BRAINSTORMING.md for Touched, Changeling)
 
 **Phase 5 — Generations and Relationships.** Time becomes the central mechanic. Units age, marry, have children, and die of old age. Social relationships form between units. The game delivers on the "individual stories" pillar — the player watches families grow, friendships develop, and generations pass.
 
@@ -229,14 +233,14 @@ Development is organized into twelve phases. Each phase produces a qualitatively
 
 *Pending:*
 - School mechanics — intelligence growth rate, teacher skill scaling, capacity overflow
-- Apprenticeship system — how it works, relationship to specialties (see _BRAINSTORMING.md)
+- Apprenticeship system — how it works, relationship to specialties (see BRAINSTORMING.md)
 
 **Phase 7 — Animals.** Hunting and animal husbandry expand the economy with new resources. Hunters venture into the forest for deer, producing meat (a new food type) and leather. Pastures are player-sizable buildings for raising livestock. Sheep provide wool and meat; cows provide meat; both produce leather on slaughter. Horses offer mounted travel and utility. With leather and wool available alongside flax, the tailor can produce fine clothing (two textiles) and noble clothing (three textiles). Hunting provides early-game access to meat and leather but is unsustainable; pastures are slower to establish but renewable.
 
 *Pending:*
 - Pasture mechanics — animal capacity, breeding, feeding, culling
 - Hunting mechanics — hunter building, deer spawning, sustainability limits
-- Horse utility — mounted travel, draft power, military role (see _BRAINSTORMING.md)
+- Horse utility — mounted travel, draft power, military role (see BRAINSTORMING.md)
 - Fine and noble clothing recipes — specific textile input combinations
 
 **Phase 8 — Gentry, Leaders, Succession.** The political layer arrives. Gentry are the ruling class — they do not work, consuming resources in exchange for political stability and military readiness. The leader's death triggers succession, and the heir's readiness (or lack thereof) creates drama. Gold mining and jewelry production come online. The potter's workshop converts clay into pottery. Class expectations now carry real economic weight: freemen and clergy expect fine clothing and pottery; gentry expect noble clothing, pottery, and jewelry. Every promotion has a tangible cost.
@@ -244,17 +248,17 @@ Development is organized into twelve phases. Each phase produces a qualitatively
 *Pending:*
 - Dynasty/succession — traversal mechanics
 - Leadership skill — growth mechanism, effects
-- Gentry activities — what gentry do with their time (see _BRAINSTORMING.md)
+- Gentry activities — what gentry do with their time (see BRAINSTORMING.md)
 - Pottery and clay — clay gathering terrain, potter's workshop details
 - Class expectation mechanics — mood penalties for missing expected goods
 
 **Phase 9 — Dangerous World.** The world beyond the village becomes a threat. Combat mechanics enable military response to bandits, wolves, and forest creatures. The blacksmith gains weapon and armor recipes. Knights train at the barracks. Drafting pulls units from their activities, creating economic tension. Injuries from combat require medical treatment. The "losing is fun" pillar expands beyond mismanagement to include external pressure.
 
 *Pending:*
-- Combat mechanics — melee system, unit stats, threat encounters (see _BRAINSTORMING.md)
-- Knight specialty — granting knighthood, gentry promotion, training system (see _BRAINSTORMING.md)
-- Barracks — function, training mechanics (see _BRAINSTORMING.md)
-- Ranged combat, scout activity (see _BRAINSTORMING.md)
+- Combat mechanics — melee system, unit stats, threat encounters (see BRAINSTORMING.md)
+- Knight specialty — granting knighthood, gentry promotion, training system (see BRAINSTORMING.md)
+- Barracks — function, training mechanics (see BRAINSTORMING.md)
+- Ranged combat, scout activity (see BRAINSTORMING.md)
 - Trait effects on movement speed
 
 **Phase 10 — Advanced Institutions.** The settlement's intellectual and spiritual life reaches its peak. Bishops lead the clergy and unlock late-game religious events. Scholars research at libraries, expanding the settlement's knowledge. Cathedrals are the culmination of religious investment — grand buildings that serve as landmarks.
@@ -267,17 +271,17 @@ Development is organized into twelve phases. Each phase produces a qualitatively
 **Phase 11 — The Forest.** The wilderness becomes a place to explore, not just harvest. Visibility and fog of war make the forest a place of uncertainty. Forest depth gameplay gates resources — basic materials are available everywhere, rarer materials require venturing deeper. Scouts reveal the map. Wildlife scales with depth: wolves appear anywhere, dire wolves are forest-only.
 
 *Pending:*
-- Visibility system — vision rules, implementation approach (see _BRAINSTORMING.md)
+- Visibility system — vision rules, implementation approach (see BRAINSTORMING.md)
 
-**Phase 12 — The Strange.** The game's supernatural layer emerges. Fey creatures inhabit the deep forest with their own alien logic — some can be bargained with, others must be fought. Christian supernatural forces introduce ghosts, demons, and possessed units. The scholar unlocks arcane magic through research, the bishop receives divine power through the Vision. The game world deepens from a grounded medieval settlement into something stranger and more mythic. See _BRAINSTORMING.md for creature lists, encounter concepts, and magic system ideas.
+**Phase 12 — The Strange.** The game's supernatural layer emerges. Fey creatures inhabit the deep forest with their own alien logic — some can be bargained with, others must be fought. Christian supernatural forces introduce ghosts, demons, and possessed units. The scholar unlocks arcane magic through research, the bishop receives divine power through the Vision. The game world deepens from a grounded medieval settlement into something stranger and more mythic. See BRAINSTORMING.md for creature lists, encounter concepts, and magic system ideas.
 
 *Pending:*
-- Fey mechanics — encounter design, diplomacy, late-game escalation (see _BRAINSTORMING.md)
-- Magic — arcane tech tree, divine scripture, spell lists, mana rates (see _BRAINSTORMING.md)
+- Fey mechanics — encounter design, diplomacy, late-game escalation (see BRAINSTORMING.md)
+- Magic — arcane tech tree, divine scripture, spell lists, mana rates (see BRAINSTORMING.md)
 - Witch gender setting — mechanical effect (depends on arcane magic system)
 
 **Unphased.** Ideas and systems that don't belong to a specific phase yet.
 
-- External trade (see _BRAINSTORMING.md)
+- External trade (see BRAINSTORMING.md)
 - Luxury goods beyond jewelry
-- Event speed controls (see _BRAINSTORMING.md)
+- Event speed controls (see BRAINSTORMING.md)

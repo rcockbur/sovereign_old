@@ -1,5 +1,5 @@
 # Sovereign — BEHAVIOR.md
-*v18 · Unit behavior: tick order, update loops, action system, classes and specialties.*
+*v19 · Unit behavior: tick order, update loops, action system, classes and specialties.*
 
 ## Simulation
 
@@ -33,10 +33,8 @@ end
 if world.time.tick % TICKS_PER_YEAR == 0 then
     time.rollFrostDays()    -- roll thaw_day and frost_day for the new year
 end
--- Frost/thaw day checks run per-day:
--- On spring day == thaw_day: set is_frost = false, fire "ground has thawed" notification
--- On autumn day == frost_day - FROST_WARNING_DAYS: fire "frost approaching" notification
--- On autumn day == frost_day: set is_frost = true, fire "frost has arrived" notification
+-- Per-day frost/thaw checks fire from the same orchestrator. See ECONOMY.md
+-- Frost and Farming for the day-by-day rules (thaw, warning, arrival).
 ```
 
 HASH OFFSET SYSTEM
@@ -102,14 +100,6 @@ Work action accumulates `skill_progress` per tick for specialty freemen/clergy (
 Drafted units: per-tick loop runs normally. Per-hash: steps 2–6 skipped (see Drafting).
 
 **Activity queue filtering:** Serfs scan for activities where `ActivityTypeConfig[type].is_specialty == false`, weighted by the serf's per-activity-type priority settings. Serf children (age 6+) use step 6 filtered to `SerfChildActivities` instead of the full non-specialty activity list. Freemen scan for activities where `type == unit.specialty`. Clergy scan the same way (matching their specialty). Gentry skip the work-polling branch of step 6 — they do not work — but still receive recreation activities when `is_done_working` is true. Freeman and gentry children under adulthood skip work polling (school attendance mechanics pending design).
-
-**Activity scoring:** All activities — hauling and non-hauling alike — are scored by a linear combination of distance and activity age:
-
-```
-score = ActivityConfig.age_weight * (current_tick - posted_tick) - manhattan_distance
-```
-
-Higher score wins. Distance is Manhattan distance measured to the activity's location: the source for hauling activities, the workplace building for building-based work activities, or the target tile (`activity.x`, `activity.y`) for designation activities. With `age_weight = 0.2`, five ticks of waiting compensate for one tile of extra distance — local-first, with decay prevention for distant activities. Serf priority settings (Phase 2) filter which activity *types* a serf considers — they do not affect how individual activities within a type are ranked.
 
 UNIT DEATH CLEANUP (sweepDead)
 
@@ -215,6 +205,16 @@ end
 ```
 
 Handlers check `unit.carrying` first: if carrying resources that are wrong for the current work, the handler routes to the nearest storage for offloading before starting the normal cycle. If carrying resources valid for the current work (e.g., a woodcutter returning from a need interrupt still holding wood), the handler skips to the deposit phase.
+
+ACTIVITY SCORING
+
+All activities — hauling and non-hauling alike — are scored by a linear combination of distance and activity age:
+
+```
+score = ActivityConfig.age_weight * (current_tick - posted_tick) - manhattan_distance
+```
+
+Higher score wins. Distance is Manhattan distance measured to the activity's location: the source for hauling activities, the workplace building for building-based work activities, or the target tile (`activity.x`, `activity.y`) for designation activities. With `age_weight = 0.2`, five ticks of waiting compensate for one tile of extra distance — local-first, with decay prevention for distant activities. Serf priority settings (Phase 2) filter which activity *types* a serf considers — they do not affect how individual activities within a type are ranked.
 
 SELF-FETCH
 
@@ -381,6 +381,8 @@ All footprint tiles are immediately claimed (`tile.building_id` set) and impassa
 
 When `build_cost` is empty (stockpiles), the construction sub-table has no bins and progress advances unconditionally — just the builder working through `build_ticks`.
 
+**Sub-table initialization on completion.** When `phase` transitions to `"complete"`, category-specific sub-tables are populated. `production.input_bins` (processing buildings): one bin per unique input resource type across the building's recipes, with capacity from BuildingConfig. `housing.bins` (housing buildings): one bin per food type from HousingBinConfig. `market.last_delivered` (market): keyed by MerchantConfig food types, all starting at 0.
+
 **P1 vs P2 differences.** The entire construction system — blueprint phase, material delivery, builder cycle — is P2+. In P1, buildings are placed instantly as `"complete"` with no construction sub-table and no build activities. The P2 optimization of checking bins remotely and pathing directly to the stockpile applies only in P2.
 
 OFFLOADING
@@ -427,7 +429,7 @@ Higher values at night pull units into bed and keep them there; lower values dur
 
 Four periods divide the day: night (NIGHT_START → MORNING_START), morning (MORNING_START → DAY_START), day (DAY_START → EVENING_START), evening (EVENING_START → NIGHT_START). Period hour constants are in CLAUDE.md. See SleepConfig in TABLES.md for threshold values per period.
 
-Both thresholds are continuous everywhere — every band boundary is a flat-to-lerp or lerp-to-flat junction. Looked up via `time.getEnergyThresholds()`, which returns `{ soft, wake }` for the current `game_hour`.
+Both thresholds are continuous everywhere — every band boundary is a flat-to-lerp or lerp-to-flat junction. Looked up via `time.getEnergyThresholds()`, which returns `{ soft, wake }` for the current time of day.
 
 **Interrupt tiers:**
 
@@ -547,7 +549,7 @@ PROMOTION PATHS
 - **Priest → Bishop:** Clergy-internal promotion. Only one bishop at a time.
 - **Any → Gentry:** Via knighthood (granted by player) or marriage to an existing gentry unit. Knighthood elevates the unit, their spouse, and their children to gentry.
 
-No demotions are currently supported. Freeman and gentry cannot be demoted. See DESIGN.md "Sections Pending Design" for demotion consideration.
+No demotions are currently supported. Freeman and gentry cannot be demoted. Demotion mechanics pending.
 
 CHILDREN
 

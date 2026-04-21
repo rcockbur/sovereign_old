@@ -1,5 +1,5 @@
 # Sovereign — CLAUDE.md
-*v26 · Technical reference for Claude Code and Claude.ai design sessions.*
+*v27 · Technical reference for Claude Code and Claude.ai design sessions.*
 
 > **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
 
@@ -10,10 +10,11 @@ Detailed specs live in separate files. Read the relevant file before implementin
 | File | Contents |
 |---|---|
 | **BEHAVIOR.md** | Tick order, hash offset, per-unit update loops (per-tick and per-hash), action types and handlers, need interrupts (soft/hard, availability gating, priority ordering), sleep (time-of-day thresholds, wake check, sleep destination, collapse), home assignment, eating behavior, homeless eating, home food self-fetch, work day and recreation (work_ticks_remaining, is_done_working, daily reset, tavern visits, wandering), carrying (rules, single-type invariant, weight cap), offloading, self-fetch and self-deposit (behavioral patterns), work cycles (designation, gathering, extraction, processing, farming, construction — site clearing, unit displacement, blueprint transition, builder cycle), production order evaluation, work in progress, equipment want behavior, drafting, unit death cleanup, building deletion cleanup, classes and specialties (promotion, children, activity filtering, skill growth). |
-| **ECONOMY.md** | Resource entities (stacks, items), containers (bin, tile inventory, stack inventory, item inventory, ground pile), reservation system (mechanism and lifecycle), resources module API, resource counts system, frost and farming (thaw/frost system, per-tile crop state, farm controls, farm activity posting, harvest yield), ground piles (entity structure, ground drop search algorithm), storage filter system (filter modes, pull mechanics, source resolution, cycle detection), merchant delivery system. |
+| **ECONOMY.md** | Resource entities (stacks, items), containers (bin, tile inventory, stack inventory, item inventory, ground pile), reservation system (mechanism and lifecycle), resources module API, resource counts system, frost and farming (thaw/frost system, per-tile crop state, farm controls, farm activity posting, harvest yield), ground piles (creation, self-posting, ground drop search algorithm), storage filter system (filter modes, pull mechanics, source resolution, cycle detection), merchant delivery system. |
 | **WORLD.md** | Map (dimensions, terrain, forest coverage, forest depth), map generation (noise setup, full pipeline, tuning), pathfinding (A*, tile costs, A* building exemption, movement model, movement speed, collision, failure), building layout (tile types, tile maps, clearing, orientation, placement validation, construction phases, buildings without tile maps, pathfinding integration), plant system (growth stages, spread, cursor scan), visibility (deferred). |
-| **TABLES.md** | Game entity data structures (unit, memory, tile, activity, production order, work in progress, building, world). All config tables (NeedsConfig, SleepConfig, RecreationConfig, MerchantConfig, HousingBinConfig, ActivityConfig, ActivityTypeConfig, SerfChildActivities, RecipeConfig, GrowthConfig, MoodThresholdConfig, MoodModifierConfig, InjuryConfig, IllnessConfig, MalnourishedConfig, ResourceConfig, PlantConfig, CropConfig, BuildingConfig, NameConfig, SettlementNameConfig, Keybinds). Production chains. |
+| **TABLES.md** | Game entity data structures (unit, memory, tile, activity, production order, work in progress, building, ground pile, world). All config tables (NeedsConfig, SleepConfig, RecreationConfig, MerchantConfig, HousingBinConfig, ActivityConfig, ActivityTypeConfig, SerfChildActivities, RecipeConfig, GrowthConfig, MoodThresholdConfig, MoodModifierConfig, InjuryConfig, IllnessConfig, MalnourishedConfig, ResourceConfig, PlantConfig, CropConfig, BuildingConfig, NameConfig, SettlementNameConfig, Keybinds). Production chains. |
 | **UI.md** | UI architecture (module structure, input routing, draw order, interaction modes), camera, input handling, hotkeys and remappable keybinds, layout (right panel, left panel, bottom bar), selection mechanics, panel contents and variations, command bar, management overlays, notification display. |
+| **CODE_AUDIT.md** | Code audit process: 7 calibrations, 6 silent per-finding sanity checks, finding format, recurring failure modes. Loaded only when an audit prompt directs. |
 
 **BEHAVIOR.md vs ECONOMY.md boundary:** BEHAVIOR.md owns what units do — all step-by-step behavioral sequences including work cycles, self-fetch/deposit flows, carrying rules, equipment want behavior, and interrupt handling. ECONOMY.md owns what the resource system provides — entities, containers, the resources module API, reservations as a mechanism, and autonomous systems like the merchant and storage filter pulls. When a unit calls a resources module function, the call sequence lives in BEHAVIOR.md; the function's contract and implementation details live in ECONOMY.md. A task involving unit behavior should only need BEHAVIOR.md (plus TABLES.md). ECONOMY.md is loaded when working on resource infrastructure itself.
 
@@ -37,14 +38,16 @@ src/              -- Love2D root (launch with `love src`)
     gamestate.lua
     loading.lua
     main_menu.lua
+    generating.lua
     playing.lua
-  core/           -- time, registry, world, simulation, log, save
+  core/           -- time, registry, world, simulation, log, save, util
   simulation/     -- units, buildings, activities, resources, filters, dynasty
   config/         -- constants.lua, keybinds.lua, tables.lua, strings.lua
   ui/             -- hub.lua, right_panel, left_panel, action_bar, command_bar, overlays, camera, renderer, dev_overlay
 tests/            -- plain Lua tests, run outside Love2D (lua tests/run.lua)
-logs/             -- timestamped log files, gitignored
 ```
+
+Logs do not live in the repo. They write to `logs/` under the Love2D save directory — see Log System.
 
 All requires use paths relative to `src/` (e.g., `require("core.world")`). Build a `.love` archive by zipping the contents of `src/`, not the repo root.
 
@@ -52,13 +55,22 @@ All requires use paths relative to `src/` (e.g., `require("core.world")`). Build
 
 ```lua
 -- main.lua
-if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then
+local args = love.arg.parseGameArguments(arg)
+ARGS_DEBUG = false
+ARGS_AUTO_NEWGAME = false
+for _, a in ipairs(args) do
+    if a == "--debug" then ARGS_DEBUG = true end
+    if a == "--newgame" then ARGS_AUTO_NEWGAME = true end
+end
+
+if ARGS_DEBUG then
     require("lldebugger").start()
 end
 
 require("config.constants")
 require("config.keybinds")
 require("config.tables")
+require("core.util")
 
 local gamestate = require("app.gamestate")
 local loading = require("app.loading")
@@ -71,21 +83,28 @@ function love.update(dt) gamestate:update(dt) end
 function love.draw() gamestate:draw() end
 function love.keypressed(key) gamestate:keypressed(key) end
 function love.mousepressed(x, y, button) gamestate:mousepressed(x, y, button) end
+function love.mousereleased(x, y, button) gamestate:mousereleased(x, y, button) end
+function love.wheelmoved(x, y) gamestate:wheelmoved(x, y) end
 ```
 
-`main.lua` is pure wiring. Constants, keybinds, and config tables load first as globals (see Constants section, Keybinds in TABLES.md, and Config Tables in TABLES.md). Constants must load before tables since tables reference conversion constants. Love2D callbacks delegate to `app/gamestate.lua`, which forwards to the current state's hooks. The `src/` directory is the Love2D root — launch with `love src` from the repo root.
+`main.lua` is pure wiring. Constants, keybinds, and config tables load first as globals (see Constants section, Keybinds in TABLES.md, and Config Tables in TABLES.md). Constants must load before tables since tables reference conversion constants. `core.util` installs `tileIndex`, `tileXY`, and `deepCopy` as globals (see Flat Index Convention and Module Ownership). Love2D callbacks delegate to `app/gamestate.lua`, which forwards to the current state's hooks. The `src/` directory is the Love2D root — launch with `love src` from the repo root.
+
+CLI flags: `--debug` enables the lldebugger startup hook (used by VS Code's lldebugger extension via `launch.json`). `--newgame` bypasses the main menu and jumps directly into world generation — convenience for iterating on simulation without clicking through the menu every launch.
 
 ## Game State Machine
 
-Stack-based in `app/gamestate.lua`. Gamestate owns only the stack mechanism — `switch`, `push`, `pop`, and callback forwarding. Each state is a separate file returning a table with hooks: `enter`, `exit`, `update(dt)`, `draw`, `keypressed`, `mousepressed`. `gamestate:switch(state)` for transitions. `gamestate:push`/`pop` reserved for future modal overlays.
+Stack-based in `app/gamestate.lua`. Gamestate owns only the stack mechanism — `switch`, `push`, `pop`, and callback forwarding. Each state is a separate file returning a table with hooks: `enter`, `exit`, `update(dt)`, `draw`, `keypressed`, `mousepressed`, `mousereleased`, `wheelmoved`. `gamestate:switch(state)` for transitions. `gamestate:push`/`pop` reserved for future modal overlays.
 
 **State files:**
 
-- `app/loading.lua` — `enter()` runs config validation (see Config Validation below). Switches to `main_menu` on success. Transient state — never runs `update`.
-- `app/main_menu.lua` — draws menu, handles input. "New Game" switches to `playing`. "Continue" appears only when a save file exists — loads the most recent save and switches to `playing`. Quit calls `love.event.quit()`.
-- `app/playing.lua` — `enter()` initializes the game: generate settlement name (stored in `world.settings.settlement_name`), map generation, spawn starting units and buildings, `resources.rebuildCounts()`. `update()` runs `simulation.onTick()`. Only `playing` runs the simulation.
+- `app/loading.lua` — `enter()` runs config validation (see Config Validation below). Switches to `main_menu` on success (or to `generating` directly when launched with `--newgame`). Transient state — never runs `update`.
+- `app/main_menu.lua` — draws menu, handles input. "New Game" switches to `generating`. "Continue" appears only when a save file exists — loads the most recent save and switches to `playing`. Quit calls `love.event.quit()`.
+- `app/generating.lua` — drives map generation as a coroutine (see WORLD.md § Map Generation). Renders a progress bar while generation runs. On completion, switches to `playing`. Transient state.
+- `app/playing.lua` — `enter()` initializes the game on a freshly-generated world: `time.init()`, `camera.init()`, `hub.init()`, `units.spawnStarting()`, `resources.rebuildCounts()`. `update()` runs `simulation.onTick()`. Only `playing` runs the simulation.
 
-Quit-to-menu from `playing` tears down the current game (clear `world` and `registry`) and returns to `main_menu`.
+Transition graph: `loading → main_menu → generating → playing` (or `loading → generating → playing` with `--newgame`).
+
+Quit-to-menu from `playing` tears down the current game (clear `world` and `registry` — see `world.initState()`) and returns to `main_menu`.
 
 ## Conventions
 
@@ -319,7 +338,7 @@ SIGHT_RADIUS        = 8
 FOREST_SIGHT_RADIUS = 3    -- TBD exact value
 
 -- Movement
-BASE_MOVE_COST       = 6     -- ticks per tile on open ground
+BASE_MOVE_COST       = 40     -- ticks per tile on open ground
 TREE_MOVE_MULTIPLIER = 3.0   -- trees stage 2+ slow movement (don't block)
 SQRT2                = math.sqrt(2)  -- diagonal movement cost multiplier
 
@@ -366,6 +385,8 @@ LOG SYSTEM (`core/log.lua`)
 
 Categories: `TIME`, `UNIT`, `ACTIVITY`, `WORLD`, `HEALTH`, `HAUL`, `SAVE`, `STATE`. Severity levels: OFF, ERROR, WARN, INFO, DEBUG. Ring buffer of last 200 messages for overlay. `log:info("UNIT", "Unit %d claimed activity %d", unit.id, activity.id)`.
 
+File output writes via `love.filesystem` to a `logs/` subdirectory under the Love2D save directory (e.g., `%APPDATA%/LOVE/sovereign/logs/` on Windows). Each session creates a timestamped file, plus `current.log` always points at the most recent session for easy tailing. The active log path is exposed as `log.filepath`. Older sessions are pruned to keep the directory bounded.
+
 DEVELOPER OVERLAY (`ui/dev_overlay.lua`)
 
 Toggled with F3. Stats bar: FPS, game_time, speed, TPS (achieved / target, with percentage), unit/building/activity counts. Tile inspector on hover: coordinates, terrain, plant_type/plant_growth, forest_depth, building_id, ground resources, claimed_by, visibility. Log tail: last ~10 messages.
@@ -381,6 +402,14 @@ F1 spawns a serf at the cursor's tile position. Shift+F1 spawns 5 serfs. Input h
 Each spawned unit goes through the normal creation path — registry, name generation, needs initialized to full, target tile claimed, `tile.unit_ids` updated — so they're indistinguishable from game-start units. If the cursor tile is impassable (water, rock), the spawn is rejected (no fallback). If the tile is pathable but has `target_of_unit` set, ring search outward for the nearest pathable tile with `target_of_unit == nil`. Batch spawn (Shift+F1) places each unit sequentially — later units in the batch ring-search outward from tiles already claimed by earlier ones. If ring search hits the radius cap, that individual spawn is silently skipped.
 
 Logs each spawn: `log:info("UNIT", "Debug spawned unit %d at (%d, %d)", unit.id, x, y)`.
+
+CLI FLAGS
+
+`--debug` enables the lldebugger startup hook for VS Code's lldebugger extension. `--newgame` bypasses the main menu and jumps directly into world generation, skipping the click-through during iteration. See Entry Point for the parsing block.
+
+UI MODULE INIT CONVENTION
+
+UI modules with mutable module-level state require an `init()` function that resets that state to defaults. `playing.enter()` calls `init()` on every such module on entry. This prevents state from a previous game session bleeding into a new game (e.g., a stale selection, an active placement mode). Currently applies to `camera`, `time`, and `hub`. Any new UI module that holds state across the playing → main_menu → playing transition must follow the same pattern.
 
 CONFIG VALIDATION (STARTUP)
 
@@ -446,7 +475,8 @@ Rendering, UI, camera, input handling, high-level integration (e.g., "does a woo
 | **Game State** | State stack, current state, Love2D callback delegation. Lives in `app/`. |
 | **Time** | Clock behavior: `advance()`, `accumulate(dt)`, `hashOffset()`, `getEnergyThresholds()`. Operates on `world.time`. |
 | **Simulation** | The `onTick` orchestrator. Owns no data. |
-| **World** | Tile grid, forest depth map, plant system. Owns all entity arrays and game state: `world.units`, `world.buildings`, `world.activities`, `world.stacks`, `world.items`, `world.ground_piles`, `world.time`, `world.magic`, `world.settings`. Ground resource storage is implementation-dependent. |
+| **World** | Tile grid, forest depth map, plant system. Owns all entity arrays and game state: `world.units`, `world.buildings`, `world.activities`, `world.stacks`, `world.items`, `world.ground_piles`, `world.time`, `world.magic`, `world.settings`. Ground resource storage is implementation-dependent. Also owns teardown — `world.initState()` clears all `world.*` arrays, walks them to remove registry entries, and resets `registry.next_id`. Called on new game and on quit-to-menu. |
+| **Util** | Lives in `core/util.lua`. Installs `tileIndex`, `tileXY`, and `deepCopy` as globals at require time. No state. Required from `main.lua` after constants/keybinds/tables. |
 | **Units** | Unit lifecycle and behavior (creation, death, promotion). Operates on `world.units`. |
 | **Buildings** | Building updates, deletion cleanup, sweep. Operates on `world.buildings`. |
 | **Resources** | Stack/item creation, destruction, transfer, counting. Maintains `world.resource_counts`. Operates on `world.stacks` and `world.items`. |
