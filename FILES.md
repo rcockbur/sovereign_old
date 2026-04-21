@@ -1,5 +1,5 @@
 # FILES.md — Document System Reference
-*v9*
+*v10*
 
 ## Documents
 
@@ -119,6 +119,4 @@ Do NOT reference Claude's memories of past sessions — memories may be outdated
 4. **Architectural problems.** Design gaps, unresolved questions that block implementation, or systems whose descriptions have drifted from the current design direction.
 5. **Bloat and structure.** Verbose prose, sections that could be shorter, information that duplicates what the code already expresses (once implemented).
 
-Present findings as a categorized list with specific references (file name, section, and the problematic text). Propose concrete fixes.
-
-After all findings are resolved, stop and ask before producing updated files. The document update rule applies here too — do not begin writing files until explicitly asked.
+Present findings as a categorized list with specific references (file name, section, and the problematic text). Propose concrete fixes. Work through findings one at a time, waiting for explicit approval before applying each fix. After all findings are resolved, stop and ask before producing updated files. The document update rule applies here too — do not begin writing files until explicitly asked.
