@@ -1,5 +1,5 @@
 # Sovereign — CLAUDE.md
-*v27 · Technical reference for Claude Code and Claude.ai design sessions.*
+*v32 · Technical reference for Claude Code and Claude.ai design sessions.*
 
 > **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
 
@@ -9,16 +9,18 @@ Detailed specs live in separate files. Read the relevant file before implementin
 
 | File | Contents |
 |---|---|
-| **BEHAVIOR.md** | Tick order, hash offset, per-unit update loops (per-tick and per-hash), action types and handlers, need interrupts (soft/hard, availability gating, priority ordering), sleep (time-of-day thresholds, wake check, sleep destination, collapse), home assignment, eating behavior, homeless eating, home food self-fetch, work day and recreation (work_ticks_remaining, is_done_working, daily reset, tavern visits, wandering), carrying (rules, single-type invariant, weight cap), offloading, self-fetch and self-deposit (behavioral patterns), work cycles (designation, gathering, extraction, processing, farming, construction — site clearing, unit displacement, blueprint transition, builder cycle), production order evaluation, work in progress, equipment want behavior, drafting, unit death cleanup, building deletion cleanup, classes and specialties (promotion, children, activity filtering, skill growth). |
-| **ECONOMY.md** | Resource entities (stacks, items), containers (bin, tile inventory, stack inventory, item inventory, ground pile), reservation system (mechanism and lifecycle), resources module API, resource counts system, frost and farming (thaw/frost system, per-tile crop state, farm controls, farm activity posting, harvest yield), ground piles (creation, self-posting, ground drop search algorithm), storage filter system (filter modes, pull mechanics, source resolution, cycle detection), merchant delivery system. |
+| **BEHAVIOR.md** | Tick order, hash offset, per-unit update loops (per-tick and per-hash), action types and handlers, `onActionComplete` priority chain (soft interrupt consumption, offloading dispatch, on-completion poll, activity handler dispatch), need interrupts (soft/hard, availability gating, priority ordering), sleep (time-of-day thresholds, wake check, sleep destination, collapse), home assignment, eating behavior, homeless eating, work day and recreation (work_ticks_remaining, is_done_working, daily reset, tavern visits, wandering), carrying (rules, single-type invariant, weight cap), work cycles (designation, gathering, extraction, processing, farming, construction — site clearing, unit displacement, blueprint transition, builder cycle), production order evaluation, work in progress, equipment want detection (fetch mechanics live in HAULING.md), drafting, unit death cleanup, building deletion cleanup, classes and specialties (promotion, children, activity filtering, skill growth). |
+| **HAULING.md** | Request and activity model, generic haul cycle, reservation lifecycle (placement, release, inviolate-except-player-intervention rule), activity slot, cleanup, variant catalog (request-based public: filter pull, construction delivery, ground pile cleanup; private transport: self-fetch as primary head phase, self-deposit as primary tail phase, merchant delivery, home food self-fetch as eat sub-step; private pickup/use: equipment fetch, eating trip; offloading as recovery path), request → activity conversion, partial-fill chain, worker polling (queue scan + on-completion poll), eligibility validation, carrying interaction. |
+| **ECONOMY.md** | Resource entities (stacks, items), containers (bin, tile inventory, stack inventory, item inventory, ground pile), reservation system (mechanism and lifecycle, inviolate-except-player-intervention rule), resources module API, resource counts system, frost and farming (thaw/frost system, per-tile crop state, farm controls, farm activity posting, harvest yield), ground piles (creation, request self-posting, ground drop search algorithm), storage filter system (filter modes, pull mechanics via requests, source resolution, cycle detection), merchant delivery system, firewood production and home heating. |
 | **WORLD.md** | Map (dimensions, terrain, forest coverage, forest depth), map generation (noise setup, full pipeline, tuning), pathfinding (A*, tile costs, A* building exemption, movement model, movement speed, collision, failure), building layout (tile types, tile maps, clearing, orientation, placement validation, construction phases, buildings without tile maps, pathfinding integration), plant system (growth stages, spread, cursor scan), visibility (deferred). |
-| **TABLES.md** | Game entity data structures (unit, memory, tile, activity, production order, work in progress, building, ground pile, world). All config tables (NeedsConfig, SleepConfig, RecreationConfig, MerchantConfig, HousingBinConfig, ActivityConfig, ActivityTypeConfig, SerfChildActivities, RecipeConfig, GrowthConfig, MoodThresholdConfig, MoodModifierConfig, InjuryConfig, IllnessConfig, MalnourishedConfig, ResourceConfig, PlantConfig, CropConfig, BuildingConfig, NameConfig, SettlementNameConfig, Keybinds). Production chains. |
-| **UI.md** | UI architecture (module structure, input routing, draw order, interaction modes), camera, input handling, hotkeys and remappable keybinds, layout (right panel, left panel, bottom bar), selection mechanics, panel contents and variations, command bar, management overlays, notification display. |
+| **TABLES.md** | Game entity data structures (unit, memory, tile, activity, request, production order, work in progress, building, ground pile, world). All config tables (NeedsConfig, SleepConfig, RecreationConfig, MerchantConfig, HousingBinConfig, ActivityConfig, ActivityTypeConfig, SerfChildActivities, RecipeConfig, GrowthConfig, MoodThresholdConfig, MoodModifierConfig, InjuryConfig, IllnessConfig, MalnourishedConfig, ResourceConfig, PlantConfig, CropConfig, BuildingConfig, NameConfig, SettlementNameConfig, Keybinds). Production chains. |
+| **UI.md** | UI architecture (module structure, module lifecycle, input routing, draw order, interaction modes), camera, input handling, hotkeys and remappable keybinds, layout (right panel, left panel, bottom bar), selection mechanics, panel contents and variations, command bar, management overlays, notification display. |
+| **DEV.md** | Logging system, developer overlay (F3 hotkey, stats bar, tile inspector), TPS tracking, debug spawn (F1), config validation rules, logic tests. Loaded only when work touches dev tooling, the log system, validation, or tests. |
 | **CODE_AUDIT.md** | Code audit process: 7 calibrations, 6 silent per-finding sanity checks, finding format, recurring failure modes. Loaded only when an audit prompt directs. |
 
-**BEHAVIOR.md vs ECONOMY.md boundary:** BEHAVIOR.md owns what units do — all step-by-step behavioral sequences including work cycles, self-fetch/deposit flows, carrying rules, equipment want behavior, and interrupt handling. ECONOMY.md owns what the resource system provides — entities, containers, the resources module API, reservations as a mechanism, and autonomous systems like the merchant and storage filter pulls. When a unit calls a resources module function, the call sequence lives in BEHAVIOR.md; the function's contract and implementation details live in ECONOMY.md. A task involving unit behavior should only need BEHAVIOR.md (plus TABLES.md). ECONOMY.md is loaded when working on resource infrastructure itself.
+**BEHAVIOR.md vs HAULING.md vs ECONOMY.md boundary:** BEHAVIOR.md owns what units do — work cycles, action types, need interrupts, sleep, drafting, classes, the `onActionComplete` priority chain. HAULING.md owns the resource-movement system as its own mechanism — request/activity model, generic haul cycle, reservation lifecycle, variant catalog, partial-fill chain, offloading. ECONOMY.md owns what the resource system provides — entities, containers, the resources module API, reservations as a low-level mechanism, the storage filter table, merchant delivery loop, ground pile drop algorithm. When a unit's behavior triggers a haul (need interrupt fires, equipment want fires, work cycle reaches a deposit phase), the trigger lives in BEHAVIOR.md and cross-references HAULING.md for the haul mechanics. When HAULING.md needs reservation primitives or container APIs, it cross-references ECONOMY.md. A task involving unit behavior typically needs BEHAVIOR.md plus TABLES.md, with HAULING.md added when the task involves resource movement. ECONOMY.md is loaded when working on resource infrastructure itself.
 
-**Simulation files vs UI file:** The domain files split into **simulation files** (BEHAVIOR.md, ECONOMY.md, WORLD.md, TABLES.md) and the **UI file** (UI.md). The simulation files own everything that would exist in a headless run — rules, state, behavior, formulas. UI.md owns how the player sees and interacts with the simulation — panels, input handling, camera, layout, interaction flows. None of it exists in a headless run.
+**Simulation files vs UI file:** The domain files split into **simulation files** (BEHAVIOR.md, HAULING.md, ECONOMY.md, WORLD.md, TABLES.md) and the **UI file** (UI.md). The simulation files own everything that would exist in a headless run — rules, state, behavior, formulas. UI.md owns how the player sees and interacts with the simulation — panels, input handling, camera, layout, interaction flows. None of it exists in a headless run.
 
 Claude Code should read the relevant file(s) before starting implementation. Most tasks require TABLES.md plus one domain file. This file (CLAUDE.md) is always loaded automatically.
 
@@ -47,7 +49,7 @@ src/              -- Love2D root (launch with `love src`)
 tests/            -- plain Lua tests, run outside Love2D (lua tests/run.lua)
 ```
 
-Logs do not live in the repo. They write to `logs/` under the Love2D save directory — see Log System.
+Logs do not live in the repo. They write to `logs/` under the Love2D save directory — see DEV.md § Logging.
 
 All requires use paths relative to `src/` (e.g., `require("core.world")`). Build a `.love` archive by zipping the contents of `src/`, not the repo root.
 
@@ -97,7 +99,7 @@ Stack-based in `app/gamestate.lua`. Gamestate owns only the stack mechanism — 
 
 **State files:**
 
-- `app/loading.lua` — `enter()` runs config validation (see Config Validation below). Switches to `main_menu` on success (or to `generating` directly when launched with `--newgame`). Transient state — never runs `update`.
+- `app/loading.lua` — `enter()` runs config validation (see DEV.md § Config Validation). Switches to `main_menu` on success (or to `generating` directly when launched with `--newgame`). Transient state — never runs `update`.
 - `app/main_menu.lua` — draws menu, handles input. "New Game" switches to `generating`. "Continue" appears only when a save file exists — loads the most recent save and switches to `playing`. Quit calls `love.event.quit()`.
 - `app/generating.lua` — drives map generation as a coroutine (see WORLD.md § Map Generation). Renders a progress bar while generation runs. On completion, switches to `playing`. Transient state.
 - `app/playing.lua` — `enter()` initializes the game on a freshly-generated world: `time.init()`, `camera.init()`, `hub.init()`, `units.spawnStarting()`, `resources.rebuildCounts()`. `update()` runs `simulation.onTick()`. Only `playing` runs the simulation.
@@ -378,95 +380,6 @@ SEASON_NAMES = { "Spring", "Summer", "Autumn", "Winter" }
 ## Strings
 
 Display names and descriptions for all game entities live in `config/strings.lua`. Regular module (not globals) — required only by UI code via `local strings = require("config.strings")`. Keyed by entity type and then by internal identifier: `strings.buildings[building_type].name`, `strings.resources[resource_type].name`. Simulation and log code use internal string keys directly — they never need display names.
-
-## Dev Tools and Testing
-
-LOG SYSTEM (`core/log.lua`)
-
-Categories: `TIME`, `UNIT`, `ACTIVITY`, `WORLD`, `HEALTH`, `HAUL`, `SAVE`, `STATE`. Severity levels: OFF, ERROR, WARN, INFO, DEBUG. Ring buffer of last 200 messages for overlay. `log:info("UNIT", "Unit %d claimed activity %d", unit.id, activity.id)`.
-
-File output writes via `love.filesystem` to a `logs/` subdirectory under the Love2D save directory (e.g., `%APPDATA%/LOVE/sovereign/logs/` on Windows). Each session creates a timestamped file, plus `current.log` always points at the most recent session for easy tailing. The active log path is exposed as `log.filepath`. Older sessions are pruned to keep the directory bounded.
-
-DEVELOPER OVERLAY (`ui/dev_overlay.lua`)
-
-Toggled with F3. Stats bar: FPS, game_time, speed, TPS (achieved / target, with percentage), unit/building/activity counts. Tile inspector on hover: coordinates, terrain, plant_type/plant_growth, forest_depth, building_id, ground resources, claimed_by, visibility. Log tail: last ~10 messages.
-
-TPS TRACKING
-
-The time module tracks ticks-per-second for the dev overlay. `ticks_this_second` increments each tick. Once per real second, the count snapshots to `ticks_last_second` and resets. Target TPS is `speed * TICK_RATE`. The overlay displays: `TPS: 2400 / 3840 (62%)`. These fields are transient runtime state on the time module — not serialized, not part of `world.time`.
-
-DEBUG SPAWN
-
-F1 spawns a serf at the cursor's tile position. Shift+F1 spawns 5 serfs. Input handling lives in the UI layer (`keypressed`); the UI resolves the cursor's world tile via camera coordinate conversion, then calls `units.spawnSerf(x, y)`. Spawn logic stays in the Units module where unit lifecycle belongs.
-
-Each spawned unit goes through the normal creation path — registry, name generation, needs initialized to full, target tile claimed, `tile.unit_ids` updated — so they're indistinguishable from game-start units. If the cursor tile is impassable (water, rock), the spawn is rejected (no fallback). If the tile is pathable but has `target_of_unit` set, ring search outward for the nearest pathable tile with `target_of_unit == nil`. Batch spawn (Shift+F1) places each unit sequentially — later units in the batch ring-search outward from tiles already claimed by earlier ones. If ring search hits the radius cap, that individual spawn is silently skipped.
-
-Logs each spawn: `log:info("UNIT", "Debug spawned unit %d at (%d, %d)", unit.id, x, y)`.
-
-CLI FLAGS
-
-`--debug` enables the lldebugger startup hook for VS Code's lldebugger extension. `--newgame` bypasses the main menu and jumps directly into world generation, skipping the click-through during iteration. See Entry Point for the parsing block.
-
-UI MODULE INIT CONVENTION
-
-UI modules with mutable module-level state require an `init()` function that resets that state to defaults. `playing.enter()` calls `init()` on every such module on entry. This prevents state from a previous game session bleeding into a new game (e.g., a stale selection, an active placement mode). Currently applies to `camera`, `time`, and `hub`. Any new UI module that holds state across the playing → main_menu → playing transition must follow the same pattern.
-
-CONFIG VALIDATION (STARTUP)
-
-Runs during the `loading` game state — the game never reaches `playing` with broken config. Walks all config tables and asserts cross-references are valid:
-
-- Every RecipeConfig input/output key exists in ResourceConfig
-- Every BuildingConfig `activity_type` references a valid ActivityTypeConfig key
-- Every ActivityTypeConfig entry with `skill` references a valid key in the unit skills table
-- Every BuildingConfig with `category == "processing"` has `max_workers == 1`
-- Every BuildingConfig with `tile_map` containing at least one `D` has exactly one `D` tile, the `D` tile is on the perimeter, all `I` tiles are contiguous and reachable from `D` through same-building edges, all layout positions fall on `I` or `D` tiles, and `X` tiles may appear anywhere
-- Every BuildingConfig with `tile_map` containing no `D` (solid building) has a tile_map of only `X` tiles and an empty `layout`
-- Every MerchantConfig bin_threshold key exists in ResourceConfig
-- Every ResourceConfig entry with `is_stackable == false` has `max_durability`
-- Every ResourceConfig entry with `nutrition` has `is_stackable == true`
-- Every ResourceConfig entry with `tool_bonus` has `is_stackable == false`
-- Every BuildingConfig processing `input_bins` type matches a key in the building's recipe inputs
-- Every HousingBinConfig type matches a valid ResourceConfig key
-
-Errors use `error()` or `assert` with descriptive messages. No graceful fallback — broken config is a programming error.
-
-LOGIC TESTS (OFFLINE)
-
-Live in `tests/`. Run outside Love2D with `luajit tests/run.lua` from the repo root. Test pure logic where incorrect math or edge cases are hard to catch visually:
-
-- Need drain rates and interrupt thresholds
-- Carrying weight / speed penalty formula
-- Mood recalculation (modifier stacking, food variety counting)
-- A* pathfinding (optimal paths, impassable tiles, escape case, diagonal rules)
-- Hash offset distribution
-- Resource transfer (split, merge, capacity clamping)
-- Resource count tally accuracy (running tallies match full recount)
-
-Tests are added per-system as that system is implemented — not batched per-phase.
-
-Test runner (`tests/run.lua`) prepends `src/` to `package.path`, requires each registered test file, and calls every function in its returned list. A test passes if it completes without error. Test files are manually registered in `run.lua`.
-
-```lua
--- tests/test_carrying.lua
-require("config.constants")
-
-local function test_speedPenaltyAtMaxWeight()
-    local weight_ratio = 32 / CARRY_WEIGHT_MAX
-    local slow_factor = MAX_CARRY_SLOW * (1 - 0 / 10)
-    local move_speed = 1.0 * (1 - weight_ratio * slow_factor)
-    assert(move_speed == 0.5, "zero-strength unit at max weight should be half speed")
-end
-
-return {
-    test_speedPenaltyAtMaxWeight,
-}
-```
-
-Testable modules must not depend on Love2D at require time. If a test crashes on require, refactor the module to remove the engine dependency — don't mock Love2D. Headless soak testing (Love2D with `t.window = false`) is deferred until enough systems exist for meaningful integration tests.
-
-NOT TESTED
-
-Rendering, UI, camera, input handling, high-level integration (e.g., "does a woodcutter complete a full work cycle"). These are faster to verify by watching the game run.
 
 ## Module Ownership
 

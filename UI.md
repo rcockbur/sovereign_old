@@ -1,5 +1,5 @@
 # Sovereign — UI.md
-*v15 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
+*v16 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
 
 ## Camera
 
@@ -25,6 +25,10 @@ ui/
   renderer.lua
   dev_overlay.lua     -- F3 debug overlay
 ```
+
+MODULE LIFECYCLE
+
+UI modules with mutable module-level state require an `init()` function that resets that state to defaults. `playing.enter()` calls `init()` on every such module on entry. This prevents state from a previous game session bleeding into a new game (e.g., a stale selection, an active placement mode). Currently applies to `camera` and `hub`. Any new UI module that holds state across the playing → main_menu → playing transition must follow the same pattern.
 
 INPUT ROUTING
 

@@ -1,5 +1,5 @@
 # Sovereign — TABLES.md
-*v22 · Reference data: game entity data structures, config tables, and production chains.*
+*v23 · Reference data: game entity data structures, config tables, and production chains.*
 
 ## Data Structures
 
@@ -76,8 +76,7 @@ unit = {
     carrying = {},          -- flat array of entity ids (single resource type; see BEHAVIOR.md Carrying)
     claimed_tile = nil,     -- tileIndex of claimed resource tile, or nil
 
-    activity_id = nil,                   -- primary activity (unskilled for serfs, specialty for freemen/clergy)
-    secondary_haul_activity_id = nil,    -- private self-posted haul activity for self-fetch/deposit; tracks reservations for cleanup
+    activity_id = nil,                   -- the unit's current activity (work, haul, need, recreation). One slot, one activity at a time.
     current_action = nil,          -- { type = "travel"|"work"|"sleep"|"idle", ... }
     soft_interrupt_pending = false, -- set by per-hash soft interrupt check, consumed by onActionComplete
     home_id = nil,                  -- building id of housing building
@@ -174,6 +173,9 @@ activity = {
     purpose = "work",        -- "work" | "interrupt" | "recreation"
     worker_id = nil,
     posted_tick = 0,
+    is_eligible = true,      -- per-tick eligibility flag, written by activities.validateEligibility().
+                             --   Workers skip activities flagged false during scan. Trivially-eligible
+                             --   activity types may leave this nil — treated as eligible.
 
     -- Regular activity fields (nil for hauling)
     x = 0, y = 0,
@@ -182,26 +184,60 @@ activity = {
 
     -- Hauling activity fields (nil for regular)
     resource_type = nil,
-    source_id = nil,         -- building id, ground pile id, or nil (unit is carrying)
-    destination_id = nil,    -- building id where the unit will deposit. Set on post for haul activities;
-                             --   set at runtime by work-cycle handlers (woodcutter, gatherer) when they
-                             --   choose a deposit target. Persists across phases until completion or
-                             --   abandonment.
-    is_private = false,      -- true for self-posted activities (self-fetch, self-deposit, merchant delivery)
+    source_id = nil,         -- building id, ground pile id, or nil (unit is carrying — self-deposit phase, offloading)
+    destination_id = nil,    -- building id where the unit will deposit, or nil. Always nil for non-haul
+                             --   activities. For haul variants, the value is set on post (self-fetch as
+                             --   primary head phase, self-deposit as primary tail phase, merchant delivery,
+                             --   home food self-fetch as eat sub-step, offloading) or set at request →
+                             --   activity conversion (filter pull, construction delivery — destination
+                             --   known from the request; ground pile cleanup — destination resolved as
+                             --   nearest with capacity at conversion). Pickup/use variants stay nil for
+                             --   the duration (equipment fetch, eating trip — use happens at the source).
+    is_private = false,      -- true for self-posted activities (self-fetch as head phase, self-deposit
+                             --   as tail phase, merchant delivery, home food self-fetch as eat sub-step,
+                             --   offloading, equipment fetch, eating trip)
 
     -- Handler-internal state (set at runtime by activity handlers)
     phase = nil,             -- string or nil. Tracks the activity's internal state machine.
-                             --   Values are activity-type-specific — see the handlers in
-                             --   simulation/activities.lua.
-    reserved_amount = nil,   -- number or nil. Set by handlers that interact with the reservation
-                             --   system. Tracks the amount reserved in the destination container so
-                             --   cleanup can release it on activity completion, abandonment, or death.
+                             --   For haul activities the standard values are "to_source" (after
+                             --   claim/reserve, before pickup) and "to_destination" (after pickup,
+                             --   before deposit). Other activity types use type-specific phase strings.
+                             --   See HAULING.md Phase Strings.
+    source_reserved_amount = nil,        -- number or nil. Amount reserved on the source container
+                                         --   (`reserved_out`). Set when the source-side reservation is
+                                         --   placed; cleared when the withdraw clears the reservation.
+                                         --   Cleanup reads this directly to release outstanding source
+                                         --   reservations. See HAULING.md Cleanup.
+    destination_reserved_amount = nil,   -- number or nil. Amount reserved on the destination container
+                                         --   (`reserved_in`). Set when the destination-side reservation
+                                         --   is placed; cleared when the deposit clears the reservation.
+                                         --   Cleanup reads this directly to release outstanding
+                                         --   destination reservations. See HAULING.md Cleanup.
 }
 ```
 
-`type` keys into ActivityTypeConfig, or `"haul"` for hauling activities. `purpose` classifies the activity — see BEHAVIOR.md for how purpose interacts with the work day counter. `is_private` marks self-posted activities — see ECONOMY.md Reservation System for the private/public distinction.
+`type` keys into ActivityTypeConfig, or `"haul"` for hauling activities. `purpose` classifies the activity — see BEHAVIOR.md for how purpose interacts with the work day counter. `is_private` marks self-posted activities — see HAULING.md for the request/activity distinction and the variant catalog.
 
-Buildings post activities when they have work available and `#posted_activity_ids < worker_limit`. All building-posted activities (operational, build, construction haul) are tracked in `building.posted_activity_ids`. The activity's `workplace_id` references the building. When a worker claims the activity, they path to the building and work. When the activity completes or the worker leaves, the building may post a new activity.
+In normal transport hauls, `source_reserved_amount` and `destination_reserved_amount` track equal values. They diverge only in pickup/use variants (only source is reserved, destination_reserved_amount is nil) and merchant delivery's first trip (source reserves the full carry load, destination reserves only `drop_amount`).
+
+Buildings post activities when they have work available and `#posted_activity_ids < worker_limit`. Building-posted activities (operational, build) are tracked in `building.posted_activity_ids`. Building-posted **requests** (filter pull, construction delivery) are tracked in `building.posted_request_ids`. The activity's `workplace_id` references the building. When a worker claims the activity, they path to the building and work. When the activity completes or the worker leaves, the building may post a new activity.
+
+REQUEST
+
+```lua
+request = {
+    id = 0,
+    type = "filter_pull",        -- "filter_pull" | "construction_delivery" | "ground_pile_cleanup"
+    resource_type = nil,         -- the type being moved
+    source_id = nil,             -- building id, ground pile id, or nil (resolved at conversion per variant)
+    destination_id = nil,        -- building id, or nil (resolved at conversion per variant)
+    requested_amount = 0,        -- aggregate need; decremented by each conversion
+    posted_tick = 0,             -- for activity scoring
+    is_eligible = true,          -- per-tick eligibility flag, written by activities.validateEligibility().
+}
+```
+
+A request represents an aggregate haul need that may take multiple workers across multiple trips to fulfill. Requests are not claimed in the activity sense — workers convert them into concrete haul activities at claim time, sized to their carry capacity and source availability. Conversion places reservations atomically and decrements `requested_amount` (or removes the request when it hits zero). See HAULING.md Requests vs Activities and HAULING.md Request → Activity Conversion for the full mechanics.
 
 PRODUCTION ORDER
 
@@ -250,9 +286,12 @@ building = {
         progress = 0,        -- ticks of work completed
     },
 
-    -- Activity tracking (all buildings)
-    posted_activity_ids = {},     -- every activity this building posted (operational, build, construction haul)
-                             -- used for staffing check (#posted_activity_ids < worker_limit) and deletion cleanup
+    -- Activity and request tracking (all buildings)
+    posted_activity_ids = {},     -- every activity this building posted (operational work, build).
+                                  -- Used for staffing check (#posted_activity_ids < worker_limit) and deletion cleanup.
+                                  -- Construction material delivery is tracked separately via posted_request_ids.
+    posted_request_ids = {},      -- every request this building posted (filter pull, construction delivery).
+                                  -- Used for deletion cleanup so requests can be removed from world.requests.
 
     -- Workforce (work-capable categories only: farming, gathering, extraction, processing, service)
     worker_limit = 0,        -- player-adjustable; capped at max_workers from BuildingConfig
@@ -302,7 +341,9 @@ building = {
 
 **`worker_limit` vs `max_workers`:** `max_workers` in BuildingConfig is the design-time ceiling. `worker_limit` on the runtime building is the player-adjustable value, defaulting to `max_workers` on construction. The player can lower `worker_limit` but never raise it above `max_workers`.
 
-**`posted_activity_ids` vs `worker_limit`:** `posted_activity_ids` tracks every activity the building has posted — both claimed and unclaimed. The activity-posting condition is `#posted_activity_ids < worker_limit`. This correctly reflects staffing even when workers are physically away from the building (gathering, self-fetching, self-depositing). A worker who leaves to self-fetch still holds a claimed activity in `posted_activity_ids`, so the building does not double-post. Activities are added to `posted_activity_ids` on posting and removed on activity completion, cancellation, or building deletion.
+**`posted_activity_ids` vs `worker_limit`:** `posted_activity_ids` tracks every operational activity the building has posted — both claimed and unclaimed. The activity-posting condition is `#posted_activity_ids < worker_limit`. This correctly reflects staffing even when workers are physically away from the building during the source-fetch head phase or deposit tail phase of a primary activity (see HAULING.md). A worker who leaves to fetch inputs still holds a claimed activity in `posted_activity_ids`, so the building does not double-post. Activities are added to `posted_activity_ids` on posting and removed on activity completion, cancellation, or building deletion.
+
+**`posted_request_ids` vs `posted_activity_ids`:** Requests are aggregate haul needs (filter pull, construction delivery) that haulers convert into trip-sized activities at claim time. Requests live in `world.requests`, not `world.activities`, so they're tracked on the building separately. Deletion cleanup walks both lists. See HAULING.md.
 
 **Building categories and valid sub-tables:**
 
@@ -316,7 +357,7 @@ building = {
 | processing | `production` |
 | service | building-specific fields (`max_students`, `market`, etc.) |
 
-Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `phase`, `is_deleted`, `posted_activity_ids`. Constructing: `construction` sub-table. Buildings with workers (categories: farming, gathering, extraction, processing, service) additionally have `worker_limit`. Storage and housing buildings have no `worker_limit` — workers don't *work at* a stockpile or a cottage. Player-sized buildings and solid buildings have no `orientation`.
+Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `phase`, `is_deleted`, `posted_activity_ids`, `posted_request_ids`. Constructing: `construction` sub-table. Buildings with workers (categories: farming, gathering, extraction, processing, service) additionally have `worker_limit`. Storage and housing buildings have no `worker_limit` — workers don't *work at* a stockpile or a cottage. Player-sized buildings and solid buildings have no `orientation`.
 
 **Construction:** Building placement creates a building entity with `phase = "complete"` (P1, instant placement — no construction sub-table) or `phase = "constructing"` / `"blueprint"` (P2, when the construction system comes online) and populates a `construction` sub-table. See BEHAVIOR.md Construction Work Cycle for the full behavioral sequence.
 
@@ -360,6 +401,7 @@ world = {
     units = {},
     buildings = {},
     activities = {},
+    requests = {},
     stacks = {},
     items = {},
     ground_piles = {},

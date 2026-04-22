@@ -1,5 +1,5 @@
 # Sovereign — ECONOMY.md
-*v14 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
+*v16 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
 
 ## Resource System
 
@@ -122,18 +122,9 @@ Both fields store **item amounts** across all container types — not weight uni
 - **Available stock** = stock - reserved_out (in item amounts)
 - **Available capacity** = capacity - used - reserved_in (converted to amounts internally for weight-capped containers)
 
-Reservations are placed when a haul activity is claimed (whether public or private). Every resource transfer in the game goes through a haul activity — self-fetch, self-deposit, filter pull activities, construction delivery, merchant delivery, and ground pile cleanup all post activities and all use reservations.
+Reservations are placed when a haul activity is created with concrete endpoints (atomic with posting for private hauls; at request → activity conversion for variants spawned from requests). See HAULING.md for the full request/activity model, the generic haul cycle, the variant catalog, and the cleanup paths that release reservations.
 
-Activities fall into two categories:
-
-| Category | Posted by | Claimable by | Examples |
-|---|---|---|---|
-| Private | Unit, claimed atomically | Same unit only | Self-fetch, self-deposit, merchant delivery, home food self-fetch, eating trip reservation, equipment want fetch |
-| Public | System or entity | Any eligible hauler | Construction delivery, ground pile cleanup, filter pull activities |
-
-Private activities are invisible to other units but visible to the reservation system. They exist purely as a vehicle for reservation tracking and cleanup.
-
-**Reservation lifecycle:** Reserve on claim → release on delivery/pickup → also release on death, need interrupt, activity cancellation, or building deletion. The `secondary_haul_activity_id` on the unit tracks private activities so death cleanup can find and release their reservations.
+**Inviolate except for direct player intervention.** Reservations are honored by every system that reads or writes capacity — every haul cycle places and clears them correctly, every capacity check respects them. The player is the one entity outside that contract: direct edits to filter limits and building deletion can invalidate in-flight reservations. The simulation handles the resulting mismatches gracefully via the partial-fill chain (for over-capacity at delivery — see HAULING.md) and building deletion cleanup (for destroyed endpoints — see BEHAVIOR.md Building Deletion). No other source of mid-flight invalidation exists.
 
 RESOURCES MODULE (`simulation/resources.lua`)
 
@@ -262,7 +253,7 @@ HARVEST YIELD
 
 Ground piles are entities that hold resources on map tiles. Created when units drop resources (hard interrupts, death, offloading when no storage has capacity, farmer harvest overflow). Each ground pile sits on one tile. The drop function prefers to spread resource types across separate tiles. See TABLES.md ground_pile for the entity data structure.
 
-Ground piles self-post one haul activity per resource type they contain. When a hauler picks up all entities of a given type, the corresponding activity is removed. When the pile is fully emptied, it is destroyed (removed from `world.ground_piles` and registry, `tile.ground_pile_id` cleared). If no valid storage has capacity, the activities still post but won't be claimed until space opens up — the pile persists on the ground indefinitely. Ground pile haul activities use `destination_id = nil` — the hauler resolves the nearest valid storage with capacity at claim time. If no storage has capacity, the activity is skipped.
+Ground piles self-post one cleanup request per resource type they contain. The request's `requested_amount` matches the pile's current contents of that type and is updated whenever a hauler withdraws (the haul activity converted from the request decrements the request on creation; if the withdraw amount differs, the request is reconciled to the pile's actual contents after the withdraw). When a request hits zero (all of that type withdrawn), the request is removed. When the pile is fully emptied, it is destroyed (removed from `world.ground_piles` and registry, `tile.ground_pile_id` cleared). If no valid storage has capacity, the request stays posted but no conversion succeeds — the pile persists on the ground until space opens up. See HAULING.md Ground pile cleanup for the request mechanics and HAULING.md Request → Activity Conversion for how haulers turn requests into trips.
 
 Not a player-configurable entity. No filters, no settings.
 
@@ -299,24 +290,33 @@ filters = {
 Three modes per type:
 
 - **reject** — building will not accept this type. Existing stock of a rejected type is not automatically removed — it remains until withdrawn by a pull from another building.
-- **accept** — building passively accepts deliveries (default routing, ground pile cleanup, self-deposit). Optional `limit` caps how much the building will hold of this type.
+- **accept** — building passively accepts deliveries (default routing for offloading, deposit phases of work cycles, and ground pile cleanup conversion). Optional `limit` caps how much the building will hold of this type.
 - **pull** — building actively pulls this type from another storage building. Required `limit` sets the target amount. Optional `source_id` names a specific source building; nil means "from anywhere."
 
 `resources.accepts()` returns true for "accept" and "pull" modes, false for "reject." `resources.getAvailableCapacity()` respects the filter limit — if set, capacity is `min(physical_capacity, limit - current_stock_of_type) - reserved_in`.
 
 PULL MECHANICS
 
-The filter system scans storage buildings via hash-offset (once per `HASH_INTERVAL`). For each building, it checks filter entries in "pull" mode and posts haul activities based on deficit:
+The filter system scans storage buildings via hash-offset (once per `HASH_INTERVAL`). For each building, it checks filter entries in "pull" mode and maintains at most one cleanup request per filter entry, sized to the current deficit:
 
 ```lua
 needed = limit - current_stock - reserved_in
-available = source_available_stock
-transfer = min(needed, available)
-
-units_per_trip = floor(CARRY_WEIGHT_MAX / ResourceConfig[resource].weight)
-trips_needed = ceil(transfer / units_per_trip)
-activities_to_post = max(0, trips_needed - activities_in_transit_for_this_filter)
 ```
+
+Where `current_stock` is the building's stock of the type and `reserved_in` is its in-flight inbound reservation amount.
+
+If `needed > 0` and no request exists for this filter entry, post one to `world.requests` with `requested_amount = needed`, `destination_id = this building`, `source_id = filter.source_id` (or nil for "from anywhere"). If a request already exists, update its `requested_amount` to match the current `needed` (the deficit may have shrunk via deliveries or grown if other sources of stock changed). If `needed <= 0`, remove the request.
+
+Haulers pick up requests from `world.requests` and convert them into trip-sized activities at claim time:
+
+```lua
+units_per_trip = floor(CARRY_WEIGHT_MAX / ResourceConfig[resource].weight)
+trip_amount = min(request.requested_amount, units_per_trip, source_available_stock)
+```
+
+The conversion places source-side and destination-side reservations atomically and decrements the request's `requested_amount` (or removes the request if it hits zero). See HAULING.md Request → Activity Conversion for the full atomic operation.
+
+The `reserved_in` term in `needed` accounts for already-claimed trips (each conversion places `reserved_in`, which the next filter scan reads). The remaining `requested_amount` on the request itself accounts for trips not yet claimed. Together they describe the full in-flight commitment to filling this filter entry.
 
 SOURCE RESOLUTION
 
@@ -330,25 +330,24 @@ When the player sets a filter entry on building A to "pull type R from building 
 
 EDGE CASES
 
-- Source empty at pickup: activity fails, removed, reservations released, re-evaluated next scan.
-- Destination full at delivery: hauler follows through to next valid storage, or drops via ground drop search. One followthrough attempt.
-- Competing demand (two buildings pulling same type from same source): reservations prevent over-commitment.
-- Resource with no valid destination: drop via ground drop search. Always.
-- Source building deleted: any filter entry on other buildings with `source_id` pointing to the deleted building reverts to `{ mode = "accept", limit = <preserved> }`. Keeps the limit, drops the directive.
+- Source empty at conversion: the request stays posted but no conversion succeeds until stock returns. Eligibility validation (HAULING.md) catches this each tick.
+- Destination capacity reduced after conversion (player lowered the filter limit mid-transit): the deposit honors current available capacity at delivery time. Overflow re-routes via the partial-fill chain (see HAULING.md). The general rule is "reservations are inviolate except for direct player intervention" — see Reservation System above.
+- Competing demand (two buildings pulling same type from same source): reservations on the source prevent over-commitment. Requests don't reserve at the source themselves; the conversion does, atomically.
+- Resource with no valid destination at delivery: drop via ground drop search at the unit's current position.
+- Source building deleted: any filter entry on other buildings with `source_id` pointing to the deleted building reverts to `{ mode = "accept", limit = <preserved> }`. Keeps the limit, drops the directive. Active requests with that source_id are removed by Building Deletion (BEHAVIOR.md).
+- Destination building deleted: the puller's filter pull request is removed by Building Deletion. In-flight haul activities are handled by the deletion matrix.
 
 RESOURCE MOVEMENT OVERVIEW
 
-Two systems handle resource movement. They don't overlap.
+Three public haul variants — ground pile cleanup, construction delivery, and filter pull — are posted as **requests** in `world.requests` (aggregate haul needs) and converted into concrete trip-sized activities by haulers at claim time. Private hauls (self-fetch as a primary phase, self-deposit as a primary phase, merchant delivery, home food self-fetch, equipment fetch, eating trip, offloading) are posted directly as activities in `world.activities`. See HAULING.md for the full request/activity model and variant catalog.
 
-**Ground pile cleanup** posts haul activities directly when piles are created. **Construction delivery** posts haul activities on building placement. Both are independent of the filter system.
+**Storage filters** control inter-storage resource flow. Default routing (offloading, ground pile cleanup conversion) delivers to the nearest storage building that accepts the type and has capacity. "Pull" filter entries post requests to actively move resources between specific buildings. The filter table on each storage building is the complete logistics configuration.
 
-**Storage filters** control all inter-storage resource flow. Default routing (self-deposit, ground pile cleanup) delivers to the nearest storage building that accepts the type and has capacity. "Pull" filter entries post pull activities to actively move resources between specific buildings. The filter table on each storage building is the complete logistics configuration.
-
-**Activity selection:** All haul activities are scored the same way as any other activity — see BEHAVIOR.md Activity Scoring.
+**Activity and request scoring** uses the same formula — see BEHAVIOR.md Activity Scoring (and HAULING.md Worker Polling for the request-side specifics).
 
 ## Merchant Delivery System
 
-The merchant is a stationed specialty worker at the market. They claim the market's activity once and run an internal delivery loop for food only. Equipment (tools, clothing) is handled by units themselves — see BEHAVIOR.md Equipment Wants. Each delivery run uses the private haul activity pattern for reservation tracking: the merchant self-posts a haul activity (source = storage building, destination = housing bin), claims it immediately, reserves stock at source and capacity at destination. This is the only system that writes to housing building bins. Without a market, units self-fetch food — see BEHAVIOR.md Home Food Self-Fetch.
+The merchant is a stationed specialty worker at the market. They claim the market's activity once and run an internal delivery loop for food only. Equipment (tools, clothing) is handled by units themselves — see BEHAVIOR.md Equipment Wants. Each delivery run uses the private haul activity pattern for reservation tracking: the merchant self-posts a haul activity (source = storage building, destination = housing bin), claims it immediately, reserves stock at source and capacity at destination. This is the only system that writes to housing building bins. Without a market, units self-fetch food — see HAULING.md Home food self-fetch.
 
 MERCHANT LOOP
 

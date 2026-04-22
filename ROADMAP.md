@@ -1,5 +1,5 @@
 # Sovereign — ROADMAP.md
-*v5 · Project planning: phase scope, pending design items, implementation milestones, decisions, and tasks.*
+*v6 · Project planning: phase scope, pending design items, implementation milestones, decisions, and tasks.*
 
 ## Implementation State
 
@@ -106,7 +106,7 @@ Verify: Designate 5 trees. Units claim chop activities, walk to trees, chop them
 
 **p1m16 — Hauling + ground piles** (M)
 Ground pile entity (id, x, y, contents array, reserved_out). Ground drop search algorithm (same-type merge within radius, fallback to empty tile, last resort = current tile). When a unit drops resources (no storage capacity), a ground pile is created via ground drop search. Ground piles self-post one haul activity per resource type. Haul work cycle: claim haul activity → path to ground pile → pick up → path to nearest stockpile with capacity → deposit. Offloading: if a unit becomes idle while carrying, self-deposit to nearest storage; if no capacity, ground drop. Ground pile rendering (small colored squares on tiles). Ground pile destroyed when emptied.
-Docs: ECONOMY.md § Ground Piles, Ground Drop Search. BEHAVIOR.md § Offloading. TABLES.md § activity (haul fields), § ground_pile.
+Docs: ECONOMY.md § Ground Piles, Ground Drop Search. BEHAVIOR.md § Hauling. TABLES.md § activity (haul fields), § ground_pile.
 Verify: Fill a stockpile completely. Designate a tree chop → unit chops, can't deposit, drops wood as ground pile. Ground pile visible on map. Another idle unit claims the haul activity and delivers to a different stockpile (or the pile persists if no space anywhere). Select ground pile → see contents in debug dump.
 
 **p1m17 — Gather designation + berry harvesting** (S)
@@ -146,7 +146,7 @@ Verify: Place fishing dock with back on water, front on land. Rejects placement 
 
 **p1m23 — Satiation + eating** (M)
 Satiation drain in per-hash loop step 1. Satiation interrupts (soft at 75, hard at 15) — availability-gated: only fires if food exists in storage (check `resource_counts.storage` for any food type). Hard interrupt: drop, release, post private eat activity. Soft interrupt: same deferred/direct pattern as energy. Eating work cycle: if `home_id` set, travel home, consume from housing bins (consumption loop: eat one item, check satiation, repeat). Food selection prefers least-recently-eaten type (`unit.last_ate`). Home food self-fetch: if home bins empty, haul food from nearest stockpile to home bin, then eat. Homeless eating: eat from nearest stockpile directly. `secondary_haul_activity_id` for food reservation during travel.
-Docs: BEHAVIOR.md § Need Interrupts (satiation), Eating Behavior, Home Food Self-Fetch, Homeless Eating, Eating Work Cycle. TABLES.md § NeedsConfig (satiation), ResourceConfig (nutrition values), HousingBinConfig. ECONOMY.md § Resources Module.
+Docs: BEHAVIOR.md § Need Interrupts (satiation), Eating Behavior, Homeless Eating, Hauling (eating trip, home food self-fetch). TABLES.md § NeedsConfig (satiation), ResourceConfig (nutrition values), HousingBinConfig. ECONOMY.md § Resources Module.
 Verify: Units get hungry and eat. With a cottage, units walk home and eat from home bins. Home runs out → unit fetches food from stockpile to home. No cottage → unit eats directly from stockpile. No food anywhere → satiation drains to 0 (no interrupt fires). `last_ate` tracks food types. Food variety rotation visible in debug dump.
 
 **p1m24 — Health + starvation + death** (M)

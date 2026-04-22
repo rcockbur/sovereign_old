@@ -1,5 +1,5 @@
 # FILES.md — Document System Reference
-*v10*
+*v12*
 
 ## Documents
 
@@ -11,8 +11,9 @@ These files are attached to the Claude project and not in `.claudeignore`. Claud
 
 - **CLAUDE.md** — Technical hub and routing table for all Tier 1 files. Read this for what's where.
 - **ROADMAP.md** — Project planning. (See CLAUDE.md.)
-- **BEHAVIOR.md, ECONOMY.md, WORLD.md, TABLES.md** — Simulation files. (See CLAUDE.md.)
+- **BEHAVIOR.md, ECONOMY.md, HAULING.md, WORLD.md, TABLES.md** — Simulation files. (See CLAUDE.md.)
 - **UI.md** — UI file. (See CLAUDE.md.)
+- **DEV.md** — Dev tools, testing infrastructure, and config validation. Loaded by Claude Code only when work touches those systems. (See CLAUDE.md.)
 - **CODE_AUDIT.md** — Code audit reference. Loaded by Claude Code only when an audit prompt directs. (See CLAUDE.md.)
 
 VISIBLE ONLY IN DESIGN SESSIONS
@@ -69,7 +70,8 @@ This table defines what DESIGN.md owns versus what the technical files own, per 
 | Needs | Three needs as pressure to stop working, starvation as failure mode | Drain rates, thresholds, interrupt firing conditions, availability gating |
 | Mood | Composite score concept, what drives it, productivity/deviancy consequences | Modifier values, threshold config, recalculation rules, food variety formula |
 | Health | Injury/illness/malnourishment as threats, death at 0 | Damage rates, recovery rates, illness config |
-| Economy | Production chain rationale, food fungibility, storage progression, storage filters as player tool | Resource entities, containers, reservations, resource counts, unit work cycles, self-fetch/deposit |
+| Economy | Production chain rationale, food fungibility, storage progression, storage filters as player tool | Resource entities, containers, reservations, resource counts, unit work cycles |
+| Hauling | (not in DESIGN.md — implementation detail) | Request and activity model, generic haul cycle, variant catalog, partial-fill chain, offloading, eligibility validation |
 | Designation | Bootstrap role, player's first tool, relationship to building-based gathering | Activity posting, tile claiming, work cycle (BEHAVIOR.md), UI interaction (UI.md) |
 | Farming | Crop risk/reward tradeoffs, seasonal personality, harvest timing as player agency | Per-tile crop state, frost mechanics, farm controls, farm activity posting, maturity formula |
 | Buildings | Interior spaces, rotation, housing types, construction phases as player experience, site clearing, deletion consequences | Tile maps, layout positions, clearing, placement validation, construction phases, A* building exemption, pathfinding integration, site clearing activities, unit displacement, deletion cleanup sequence |

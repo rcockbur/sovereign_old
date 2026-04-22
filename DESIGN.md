@@ -1,5 +1,5 @@
 # Sovereign — Design Document
-*v17*
+*v18*
 
 ## Project Overview
 
@@ -209,7 +209,7 @@ See TABLES.md for NeedsConfig, RecreationConfig, ResourceConfig, MoodThresholdCo
 
 ## Activity System
 
-All work flows through a single activity queue — one system, one mental model for the player. Workers handle their own supply chain; dedicated haulers manage logistics. See BEHAVIOR.md for action system, activity queue filtering, work cycles, and self-fetch/self-deposit.
+All work flows through a single activity queue — one system, one mental model for the player. Workers handle their own supply chain; dedicated haulers manage logistics. See BEHAVIOR.md for action system, activity queue filtering, and work cycles. See HAULING.md for the resource-movement system.
 
 ## Economy
 
@@ -217,7 +217,7 @@ The economy is built around production chains that transform raw resources into 
 
 Four food types exist: bread, berries, fish, and meat. Bread, berries, and fish are available through the early economy. Meat arrives with hunting and animal husbandry. Food is designed so the player can assess total supply at a glance — conversion ratios are intuitive and all food types have equal value. Food variety rewards diversification — players benefit from maintaining multiple food sources even after bread becomes the staple. See TABLES.md ResourceConfig and RecipeConfig for specific values.
 
-Consumer goods (food, clothing, tools) are produced through the economy and consumed by units over time. Food is delivered to homes by the merchant, a specialty worker at the market. The market is a meaningful infrastructure milestone — before building one, units fetch their own food, which is less efficient. A skilled merchant delivers more efficiently and naturally diversifies home food supplies, supporting the food variety mood bonus. Equipment degrades over time, and units replace their own gear from storage when needed — infrequent enough that it doesn't burden the economy. See ECONOMY.md for Merchant Delivery System. See BEHAVIOR.md for Equipment Wants and Home Food Self-Fetch.
+Consumer goods (food, clothing, tools) are produced through the economy and consumed by units over time. Food is delivered to homes by the merchant, a specialty worker at the market. The market is a meaningful infrastructure milestone — before building one, units fetch their own food, which is less efficient. A skilled merchant delivers more efficiently and naturally diversifies home food supplies, supporting the food variety mood bonus. Equipment degrades over time, and units replace their own gear from storage when needed — infrequent enough that it doesn't burden the economy. See ECONOMY.md for Merchant Delivery System. See BEHAVIOR.md for Equipment Wants. See HAULING.md for the variant catalog including merchant delivery, home food self-fetch, and equipment fetch.
 
 CLOTHING AND TEXTILES
 
