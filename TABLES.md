@@ -1,5 +1,5 @@
 # Sovereign — TABLES.md
-*v23 · Reference data: game entity data structures, config tables, and production chains.*
+*v27 · Reference data: game entity data structures, config tables, and production chains.*
 
 ## Data Structures
 
@@ -184,25 +184,25 @@ activity = {
 
     -- Hauling activity fields (nil for regular)
     resource_type = nil,
-    source_id = nil,         -- building id, ground pile id, or nil (unit is carrying — self-deposit phase, offloading)
+    source_id = nil,         -- building id, ground pile id, or nil (unit is carrying — self-deposit, offloading)
     destination_id = nil,    -- building id where the unit will deposit, or nil. Always nil for non-haul
-                             --   activities. For haul variants, the value is set on post (self-fetch as
-                             --   primary head phase, self-deposit as primary tail phase, merchant delivery,
-                             --   home food self-fetch as eat sub-step, offloading) or set at request →
-                             --   activity conversion (filter pull, construction delivery — destination
-                             --   known from the request; ground pile cleanup — destination resolved as
-                             --   nearest with capacity at conversion). Pickup/use variants stay nil for
-                             --   the duration (equipment fetch, eating trip — use happens at the source).
-    is_private = false,      -- true for self-posted activities (self-fetch as head phase, self-deposit
-                             --   as tail phase, merchant delivery, home food self-fetch as eat sub-step,
-                             --   offloading, equipment fetch, eating trip)
+                             --   activities. For haul variants, the value is set on post (processing
+                             --   source-fetch, self-deposit, merchant delivery, home food self-fetch as
+                             --   eat path, offloading) or set at request → activity conversion (filter
+                             --   pull, construction delivery — destination known from the request;
+                             --   ground pile cleanup — destination resolved as nearest with capacity at
+                             --   conversion). Pickup/use variants stay nil for the duration (equipment
+                             --   fetch, eating trip — use happens at the source).
+    is_private = false,      -- true for self-posted activities (processing source-fetch, self-deposit,
+                             --   merchant delivery, home food self-fetch as eat path, offloading,
+                             --   equipment fetch, eating trip)
 
     -- Handler-internal state (set at runtime by activity handlers)
-    phase = nil,             -- string or nil. Tracks the activity's internal state machine.
-                             --   For haul activities the standard values are "to_source" (after
-                             --   claim/reserve, before pickup) and "to_destination" (after pickup,
-                             --   before deposit). Other activity types use type-specific phase strings.
-                             --   See HAULING.md Phase Strings.
+    phase = "to_source",     -- string. Tracks the activity's internal state machine. Always non-nil.
+                             --   Pure haul activities use "to_source" / "to_destination". Work
+                             --   activities (processing, gathering, farming, etc.) and private need
+                             --   activities (eat, sleep, recreation) use type-specific phase strings.
+                             --   See HAULING.md Phase Strings for the full catalog.
     source_reserved_amount = nil,        -- number or nil. Amount reserved on the source container
                                          --   (`reserved_out`). Set when the source-side reservation is
                                          --   placed; cleared when the withdraw clears the reservation.
@@ -210,15 +210,18 @@ activity = {
                                          --   reservations. See HAULING.md Cleanup.
     destination_reserved_amount = nil,   -- number or nil. Amount reserved on the destination container
                                          --   (`reserved_in`). Set when the destination-side reservation
-                                         --   is placed; cleared when the deposit clears the reservation.
-                                         --   Cleanup reads this directly to release outstanding
-                                         --   destination reservations. See HAULING.md Cleanup.
+                                         --   is placed; cleared when the deposit completes. The full
+                                         --   reservation is released regardless of how much was
+                                         --   actually deposited — the partial-fill chain handles any
+                                         --   overflow separately. Cleanup reads this directly to
+                                         --   release outstanding destination reservations. See
+                                         --   HAULING.md Cleanup and Partial-Fill Chain.
 }
 ```
 
 `type` keys into ActivityTypeConfig, or `"haul"` for hauling activities. `purpose` classifies the activity — see BEHAVIOR.md for how purpose interacts with the work day counter. `is_private` marks self-posted activities — see HAULING.md for the request/activity distinction and the variant catalog.
 
-In normal transport hauls, `source_reserved_amount` and `destination_reserved_amount` track equal values. They diverge only in pickup/use variants (only source is reserved, destination_reserved_amount is nil) and merchant delivery's first trip (source reserves the full carry load, destination reserves only `drop_amount`).
+In normal transport hauls, `source_reserved_amount` and `destination_reserved_amount` track equal values. They diverge in pickup/use variants (only source is reserved, destination_reserved_amount is nil), merchant delivery's first trip (source reserves the full carry load, destination reserves only `drop_amount`), and eat activity phases (both fields are nil during `to_consumption_site` and `consuming`; populated like a normal transport haul during `fetching_food_to_source` and `fetching_food_returning`).
 
 Buildings post activities when they have work available and `#posted_activity_ids < worker_limit`. Building-posted activities (operational, build) are tracked in `building.posted_activity_ids`. Building-posted **requests** (filter pull, construction delivery) are tracked in `building.posted_request_ids`. The activity's `workplace_id` references the building. When a worker claims the activity, they path to the building and work. When the activity completes or the worker leaves, the building may post a new activity.
 
@@ -234,6 +237,12 @@ request = {
     requested_amount = 0,        -- aggregate need; decremented by each conversion
     posted_tick = 0,             -- for activity scoring
     is_eligible = true,          -- per-tick eligibility flag, written by activities.validateEligibility().
+
+    -- Cached per tick by validateEligibility for scoring. See HAULING.md Worker Polling and
+    -- Eligibility Validation.
+    cached_source_id = nil,      -- resolved source, when source was nil at request time
+    cached_destination_id = nil, -- resolved destination, when destination was nil at request time
+    cached_source_to_dest = nil, -- Manhattan distance between (resolved) source and destination
 }
 ```
 
@@ -275,10 +284,10 @@ building = {
     clearing_tile = nil,     -- flat tile index of this building's clearing (nil for solid and player-sized buildings).
                              --   Derived at placement time as the tile immediately outward from the door on the door face.
                              --   See WORLD.md Building Layout Clearing.
-    phase = "constructing",  -- "blueprint" | "constructing" | "complete"
+    construction_state = "constructing",  -- "blueprint" | "constructing" | "complete"
     is_deleted = false,      -- flagged for deletion, swept at end of tick
 
-    -- Construction (present only while phase ~= "complete", nil after completion)
+    -- Construction (present only while construction_state ~= "complete", nil after completion)
     construction = {
         bins = {},           -- array of bins (container_type = "bin"): { type, capacity, contents, reserved_in, reserved_out }
                              -- one bin per build_cost type, capacity = exact required amount
@@ -341,7 +350,7 @@ building = {
 
 **`worker_limit` vs `max_workers`:** `max_workers` in BuildingConfig is the design-time ceiling. `worker_limit` on the runtime building is the player-adjustable value, defaulting to `max_workers` on construction. The player can lower `worker_limit` but never raise it above `max_workers`.
 
-**`posted_activity_ids` vs `worker_limit`:** `posted_activity_ids` tracks every operational activity the building has posted — both claimed and unclaimed. The activity-posting condition is `#posted_activity_ids < worker_limit`. This correctly reflects staffing even when workers are physically away from the building during the source-fetch head phase or deposit tail phase of a primary activity (see HAULING.md). A worker who leaves to fetch inputs still holds a claimed activity in `posted_activity_ids`, so the building does not double-post. Activities are added to `posted_activity_ids` on posting and removed on activity completion, cancellation, or building deletion.
+**`posted_activity_ids` vs `worker_limit`:** `posted_activity_ids` tracks every operational activity the building has posted — both claimed and unclaimed. The activity-posting condition is `#posted_activity_ids < worker_limit`. This correctly reflects staffing even when workers are physically away from the building during the source-fetch or deposit steps of a work activity (see HAULING.md). A worker who leaves to fetch inputs still holds a claimed activity in `posted_activity_ids`, so the building does not double-post. Activities are added to `posted_activity_ids` on posting and removed on activity completion, cancellation, or building deletion.
 
 **`posted_request_ids` vs `posted_activity_ids`:** Requests are aggregate haul needs (filter pull, construction delivery) that haulers convert into trip-sized activities at claim time. Requests live in `world.requests`, not `world.activities`, so they're tracked on the building separately. Deletion cleanup walks both lists. See HAULING.md.
 
@@ -357,9 +366,9 @@ building = {
 | processing | `production` |
 | service | building-specific fields (`max_students`, `market`, etc.) |
 
-Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `phase`, `is_deleted`, `posted_activity_ids`, `posted_request_ids`. Constructing: `construction` sub-table. Buildings with workers (categories: farming, gathering, extraction, processing, service) additionally have `worker_limit`. Storage and housing buildings have no `worker_limit` — workers don't *work at* a stockpile or a cottage. Player-sized buildings and solid buildings have no `orientation`.
+Common fields on all buildings: `id`, `type`, `category`, `x`, `y`, `width`, `height`, `orientation`, `construction_state`, `is_deleted`, `posted_activity_ids`, `posted_request_ids`. Constructing: `construction` sub-table. Buildings with workers (categories: farming, gathering, extraction, processing, service) additionally have `worker_limit`. Storage and housing buildings have no `worker_limit` — workers don't *work at* a stockpile or a cottage. Player-sized buildings and solid buildings have no `orientation`.
 
-**Construction:** Building placement creates a building entity with `phase = "complete"` (P1, instant placement — no construction sub-table) or `phase = "constructing"` / `"blueprint"` (P2, when the construction system comes online) and populates a `construction` sub-table. See BEHAVIOR.md Construction Work Cycle for the full behavioral sequence.
+**Construction:** Building placement creates a building entity with `construction_state = "complete"` (P1, instant placement — no construction sub-table) or `construction_state = "constructing"` / `"blueprint"` (P2, when the construction system comes online) and populates a `construction` sub-table. See BEHAVIOR.md Construction Work Cycle for the full behavioral sequence.
 
 **Building deletion:** The player marks a building for deletion by setting `is_deleted = true`. Deletion is processed at end of tick in `buildings.sweepDeleted`, after `units.sweepDead`. See BEHAVIOR.md Building Deletion for the full cleanup sequence.
 
@@ -382,7 +391,7 @@ ground_pile = {
     id = 0,
     x = 0, y = 0,
     contents = {},       -- flat array of entity ids (stacks and items mixed)
-    reserved_out = 0,    -- amount spoken for by haulers claiming pickup activities
+    reserved_out = {},   -- type-keyed: amount spoken for by haulers claiming pickup activities
 }
 ```
 
@@ -517,7 +526,6 @@ RecreationConfig = {
 -- Serf children use meager, freeman children use standard, gentry children use luxurious.
 
 MerchantConfig = {
-    carry_capacity = 64,                       -- merchant's carry cap (overrides CARRY_WEIGHT_MAX)
     idle_ticks_base = 2 * TICKS_PER_HOUR,      -- reduced by trading skill
     drop_amount = 2,
     critical_threshold = 2,     -- per member, total food across all types
@@ -531,12 +539,12 @@ MerchantConfig = {
 }
 
 -- Housing bin definitions — built dynamically on housing construction.
--- One bin per entry. Food bins use weight-based capacity (stackable).
+-- One bin per entry. Housing food bins are uncapped — see ECONOMY.md Containers.
 -- Equipment (tools, clothing) is not stored in housing — units self-fetch from storage.
 HousingBinConfig = {
-    { type = "bread",       capacity = 128 },
-    { type = "berries",     capacity = 128 },
-    { type = "fish",        capacity = 128 },
+    { type = "bread" },
+    { type = "berries" },
+    { type = "fish" },
 }
 
 ActivityConfig = {
@@ -550,7 +558,7 @@ ActivityConfig = {
 -- work_source determines where work_ticks comes from:
 --   "plant"  — PlantConfig[plant_type].harvest_ticks (woodcutter, gatherer, herbalist)
 --   "recipe" — RecipeConfig[recipe].work_ticks (miller, baker, brewer, tailor, smith, smelter)
---   "crop"   — CropConfig[crop].plant_ticks or .harvest_ticks depending on current work (farmer)
+--   "crop"   — CropConfig[crop].plant_ticks (farmer_planting) or .harvest_ticks (farmer_harvesting)
 --   "activity"    — work_ticks on this ActivityTypeConfig entry (iron_miner, stonecutter, fisher)
 --   "target" — target building's build_ticks (builder)
 --   nil      — no work_ticks, ongoing service (hauler, priest, bishop, teacher, barkeep, merchant, physician)
@@ -562,7 +570,8 @@ ActivityTypeConfig = {
     stonecutter  = { is_specialty = false, attribute = "strength",     work_source = "activity", work_ticks = 2 * TICKS_PER_HOUR },
     miller       = { is_specialty = false, attribute = "strength",     work_source = "recipe" },
     builder      = { is_specialty = false, attribute = "intelligence", work_source = "target" },
-    farmer       = { is_specialty = false, attribute = "intelligence", work_source = "crop" },
+    farmer_planting   = { is_specialty = false, attribute = "intelligence", work_source = "crop" },
+    farmer_harvesting = { is_specialty = false, attribute = "intelligence", work_source = "crop" },
     fisher       = { is_specialty = false, attribute = "intelligence", work_source = "activity", work_ticks = 2 * TICKS_PER_HOUR },
     gatherer     = { is_specialty = false, attribute = "intelligence", work_source = "plant" },
     herbalist    = { is_specialty = false, attribute = "intelligence", work_source = "plant" },
@@ -584,7 +593,7 @@ ActivityTypeConfig = {
     bishop       = { is_specialty = true, class = "clergy",  attribute = "charisma",     skill = "priesthood",   max_skill = 10 },
 }
 
-SerfChildActivities = { "hauler", "farmer", "gatherer", "fisher" }
+SerfChildActivities = { "hauler", "farmer_planting", "farmer_harvesting", "gatherer", "fisher" }
 
 RecipeConfig = {
     flour           = { input = { wheat = 1 },              output = { flour = 1 },           work_ticks = 30 * TICKS_PER_MINUTE },
@@ -841,7 +850,10 @@ BuildingConfig = {
         build_cost = { wood = 10 },
         build_ticks_per_tile = 15 * TICKS_PER_MINUTE,
         max_workers = 4,
-        activity_type = "farmer",
+        activity_types = { "farmer_planting", "farmer_harvesting" },
+        -- Posting rule: harvesting takes slot priority. Post farmer_harvesting up to worker_limit
+        -- when harvesting is eligible; fill remaining slots with farmer_planting when planting is
+        -- eligible. See HAULING.md Eligibility Validation for the per-type predicates.
         -- crop set by player: "wheat" | "barley" | "flax" | nil (fallow)
         -- per-crop plant_ticks, harvest_ticks, growth_ticks, and yield_per_tile live in CropConfig
         -- farm controls: allow_planting (toggle), auto_harvest (off/per_tile/per_farm), "Harvest Now" button

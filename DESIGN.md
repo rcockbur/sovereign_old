@@ -1,5 +1,5 @@
 # Sovereign — Design Document
-*v18*
+*v19*
 
 ## Project Overview
 
@@ -275,9 +275,9 @@ Three housing types with no quality tiers — any unit can live in any housing t
 
 Three storage types with distinct roles. See Storage above for design rationale.
 
-See TABLES.md for BuildingConfig and bed assignment. See WORLD.md for building layout and construction phases.
+See TABLES.md for BuildingConfig and bed assignment. See WORLD.md for building layout and construction states.
 
-In Phase 1, buildings are placed instantly — no construction time, no material cost. All obstructions (trees, bushes, ground piles, units) block placement — the player must clear the site first. Starting in Phase 2, proper construction replaces instant-build. Placing a building begins a construction process — the site is cleared of obstructions, materials are delivered, and a builder works until the structure is complete. See WORLD.md Construction Phases for phase rules. See BEHAVIOR.md Construction Work Cycle for clearing and building behavior.
+In Phase 1, buildings are placed instantly — no construction time, no material cost. All obstructions (trees, bushes, ground piles, units) block placement — the player must clear the site first. Starting in Phase 2, proper construction replaces instant-build. Placing a building begins a construction process — the site is cleared of obstructions, materials are delivered, and a builder works until the structure is complete. See WORLD.md Construction States for lifecycle rules. See BEHAVIOR.md Construction Work Cycle for clearing and building behavior.
 
 The player can delete buildings. Deletion has real consequences — residents are displaced, stored resources spill onto the ground, and linked logistics are severed. Buildings under construction can also be deleted. See BEHAVIOR.md Building Deletion for the full cleanup sequence.
 

@@ -1,5 +1,5 @@
 # Sovereign — BEHAVIOR.md
-*v21 · Unit behavior: tick order, update loops, action system, classes and specialties.*
+*v26 · Unit behavior: tick order, update loops, action system, classes and specialties.*
 
 ## Simulation
 
@@ -126,7 +126,7 @@ Runs at end of tick after `units.sweepDead`. The player marks a building for del
 
 For each building where `is_deleted == true`:
 
-**1. Remove requests posted by this building.** Walk `world.requests`. Any request whose source or destination is this building is removed. This covers filter pull requests (puller's storage = this building) and construction delivery requests (destination = this building). Requests have no reservations of their own, so no per-request reservation release is needed. Concrete haul activities that were already converted from these requests are handled by step 2.
+**1. Remove requests posted by this building.** Walk the building's `posted_request_ids`. For each request id, remove the request from `world.requests` and registry. This covers filter pull requests (puller's storage = this building) and construction delivery requests (destination = this building). Ground pile cleanup requests are not in `posted_request_ids` — they're posted by ground piles and unaffected by building deletion. Requests have no reservations of their own, so no per-request reservation release is needed. Concrete haul activities that were already converted from these requests are handled by step 2.
 
 **2. Walk `world.units` once** — check each living unit's `activity_id`. For each unit whose `activity_id` references a haul activity where the activity's source or destination is this building, apply this matrix:
 
@@ -166,7 +166,7 @@ ACTION TYPES
 | sleep | recover energy per tick (see Sleep section) | energy ≥ current wake threshold |
 | idle | do nothing | never (cleared by activity poll or interrupt) |
 
-Resource transfers (picking up from buildings, depositing to buildings) are instant inline operations performed by the handler between actions — not actions themselves. Work completion auto-grants resources to `unit.carrying` for gathering activities (via `resources.carryResource`).
+Resource transfers (picking up from buildings, depositing to buildings) are instant inline operations performed by the handler between actions — not actions themselves. Work completion auto-grants resources to `unit.carrying` for gathering activities (via `resources.produceIntoCarrying`).
 
 Recreation activities (tavern visit, wandering) are private activities with handlers, following the same pattern as eat and sleep activities. They use travel and idle actions — no distinct recreation action type. See Work Day and Recreation for the behavioral flow.
 
@@ -209,7 +209,7 @@ function unit:onActionComplete()
         return
     end
 
-    -- 4. On-completion poll — unit just finished a primary, idle and not carrying.
+    -- 4. On-completion poll — unit just finished an activity, idle and not carrying.
     --    Scan world.activities (unclaimed concrete) and world.requests (aggregate
     --    haul needs). Same filter and scoring rules as per-hash queue polling.
     --    See HAULING.md Worker Polling.
@@ -221,7 +221,7 @@ function unit:onActionComplete()
 end
 ```
 
-Handlers check `unit.carrying` first: if carrying resources that are wrong for the current work, the handler routes to the nearest storage for offloading before starting the normal cycle. If carrying resources valid for the current work (e.g., a woodcutter returning from a need interrupt still holding wood), the handler skips to the deposit phase.
+Handlers check `unit.carrying` first: if carrying resources that are wrong for the current work, the handler routes to the nearest storage for offloading before starting the normal cycle. If carrying resources valid for the current work (e.g., a woodcutter returning from a need interrupt still holding wood), the handler skips directly to the `to_storage` phase.
 
 ACTIVITY SCORING
 
@@ -235,7 +235,7 @@ Higher score wins. Distance is Manhattan distance measured to the activity's loc
 
 SELF-FETCH AND SELF-DEPOSIT
 
-Processing workers' input fetch and output deposit are phases of the primary processing activity, not separate haul activities. When a worker claims a processing activity and the building's input bins are insufficient for the next recipe, the claim is atomic with resolving a source, reserving its stock, and routing through a source-fetch head phase before the workplace phase. After the work phase produces output, the deposit tail phase routes to the nearest storage with capacity. Both phases use the partial-fill chain when relevant. See HAULING.md for the full mechanics, request/activity model, and reservation handling.
+Processing workers' input fetch and output deposit are steps of the processing activity, not separate haul activities. When a worker claims a processing activity and the building's input bins are insufficient for the next recipe, the claim is atomic with resolving a source, reserving its stock, and starting the activity in `to_input_source` before entering `to_workplace`. After the `working` phase produces output, the activity transitions to `to_storage`, routing to the nearest storage with capacity. Both steps use the partial-fill chain when relevant. See HAULING.md for the full mechanics, request/activity model, and reservation handling.
 
 GATHERING WORK CYCLE
 
@@ -247,9 +247,9 @@ Designation (player-posted, no hub):
 2. Path to the resource tile using adjacent-to-rect (1×1). If no valid orthogonal neighbor exists (all impassable or target-claimed), unclaim the tile, remove the activity, go idle.
 3. On arrival validation: if the tile's plant is gone (chopped by another worker, or designation cancelled), remove the activity and go idle.
 4. Execute work action (duration from `PlantConfig[type].harvest_ticks`).
-5. On work completion: unclaim the tile, grant `PlantConfig[type].harvest_yield` of the resource to `unit.carrying` (via `resources.carryResource`). Remove the designation activity from `world.activities`.
+5. On work completion: unclaim the tile, grant `PlantConfig[type].harvest_yield` of the resource to `unit.carrying` (via `resources.produceIntoCarrying`). Remove the designation activity from `world.activities`.
 6. Check: `unit:carryableAmount(type) >= PlantConfig[type].harvest_yield` AND another unclaimed designation of the same resource type exists? If yes → claim next nearest designation activity (scan from **unit position**), go to step 2.
-7. If carry full or no more designations → deposit phase: route to nearest storage with capacity, deposit, complete the activity (see HAULING.md Self-deposit primary phase).
+7. If carry full or no more designations → transition to `to_storage`: route to nearest storage with capacity, deposit, complete the activity (see HAULING.md Self-deposit).
 8. Activity complete. Unit goes idle → polls for next activity.
 
 Each designation is one activity per tile — consumed on completion. Cancelling a designation removes the activity from `world.activities`; if a serf had claimed it, clear `unit.activity_id`, `unit.claimed_tile`, and `tile.claimed_by`.
@@ -265,24 +265,22 @@ Building-based (hub → resource → storage):
 3. Claim the tile: set `unit.claimed_tile` and `tile.claimed_by`.
 4. Path to the resource tile using adjacent-to-rect (1×1). If no valid orthogonal neighbor exists, unclaim the tile, scan for the next valid resource tile from unit position.
 5. Execute work action (duration from `PlantConfig[type].harvest_ticks`).
-6. On completion: unclaim the tile, grant `PlantConfig[type].harvest_yield` of the resource to `unit.carrying` (via `resources.carryResource`).
+6. On completion: unclaim the tile, grant `PlantConfig[type].harvest_yield` of the resource to `unit.carrying` (via `resources.produceIntoCarrying`).
 7. Check: `unit:carryableAmount(type) >= PlantConfig[type].harvest_yield` AND a valid tile exists (scan from **unit position**)? If yes → claim next tile, go to step 4.
-8. If carry full or no valid tiles → deposit phase: route to nearest storage with capacity, deposit (see HAULING.md Self-deposit primary phase).
-9. Go to step 1.
+8. If carry full or no valid tiles → transition to `to_storage`: route to nearest storage with capacity, deposit (see HAULING.md Self-deposit). Activity completes.
 
-The worker always visits the hub before scanning. First cycle, every cycle — same flow. The first scan uses building position (keeps gatherers working near their hub). Subsequent scans within a trip use unit position (allows efficient chaining rather than bouncing back toward the hub).
+The worker visits the hub once per activity, before scanning. The first scan uses building position (keeps gatherers working near their hub). Subsequent scans within the same trip use unit position (allows efficient chaining rather than bouncing back toward the hub). After deposit, the worker repolls via `onActionComplete` on-completion poll (see HAULING.md Worker Polling) and may re-claim the same building's next activity if one is posted.
 
 If a worker's scan at the hub finds nothing (step 2), the worker releases the activity. The race condition (building counted a target that got claimed between the building's hash tick and the worker's arrival) resolves naturally — the building's next hash tick sees fewer targets and adjusts.
 
 Extraction (stationary work → storage):
 
 1. Worker stays at building, executes work action (duration from `ActivityTypeConfig[type].work_ticks`).
-2. On completion: 1 unit of the resource goes into `unit.carrying` (via `resources.carryResource`).
+2. On completion: 1 unit of the resource goes into `unit.carrying` (via `resources.produceIntoCarrying`).
 3. Check: `unit:carryableAmount(type) >= 1`? If yes → go to step 1.
-4. If carry full → deposit phase: route to nearest storage with capacity, deposit (see HAULING.md Self-deposit primary phase).
-5. Return to building, repeat.
+4. If carry full → transition to `to_storage`: route to nearest storage with capacity, deposit (see HAULING.md Self-deposit). Activity completes.
 
-Extraction yield is always 1 per work cycle. The cycle duration (work_ticks) is the tuning knob for extraction rate. Extraction buildings do not deplete — the cycle repeats indefinitely.
+Extraction yield is always 1 per work cycle. The cycle duration (work_ticks) is the tuning knob for extraction rate. Extraction buildings do not deplete — the building reposts a new activity on its next hash tick and the worker typically re-claims via the on-completion poll (see HAULING.md Worker Polling).
 
 Unclaim fires on activity abandonment (need interrupt, draft, death). Death cleanup handles `claimed_tile` in sweepDead step 8.
 
@@ -290,20 +288,20 @@ PROCESSING WORK CYCLE
 
 `work_in_progress` persists on the building across worker changes. If a worker dies or leaves mid-craft, the partial progress remains and any new worker who takes a activity at the building resumes from where the previous worker left off. Buildings with `work_in_progress` always have `max_workers = 1`.
 
-A processing activity is a single primary activity with optional source-fetch and deposit phases bracketing the work phase. The building posts the activity; the worker claims it; the head and tail phases are configured at claim time based on the building's input bin state and (after the work phase) the worker's carry. See HAULING.md (Self-fetch and Self-deposit primary phases) for the full mechanics.
+A processing activity is a single activity with an optional source-fetch step preceding the `working` phase and a deposit step following it. The building posts the activity; the worker claims it; the starting phase and whether a source-fetch is needed are configured at claim time based on the building's input bin state. See HAULING.md (Processing source-fetch and Self-deposit) for the full mechanics.
 
 Worker checks `production_orders` top to bottom, takes the first match with available inputs (checked against the building's input bins or any reachable source). Standing orders check if `resource_counts.storage[type]` is below `amount`. `amount = -1` means unlimited — always craft, ignore stockpile count. Finite orders decrement `amount` on each craft completion and are removed at 0.
 
 The worker's cycle within one claim:
 
-1. **Source-fetch head phase** (configured at claim if the building's input bins are insufficient for the next recipe). Atomic with the claim: resolve nearest source with stock, reserve, route to source, withdraw a full carry load, route to building, deposit excess into the input bin. Excess beyond the recipe's needs stays in the bin for future crafts.
-2. **Work phase.** Subtract recipe inputs from bins, begin work action. On completion, finished goods go into `unit.carrying` via `resources.carryResource`.
+1. **Source-fetch** (`to_input_source` phase, configured at claim if the building's input bins are insufficient for the next recipe). Atomic with the claim: resolve nearest source with stock, reserve, route to source, withdraw a full carry load, route to building (`to_workplace`), deposit excess into the input bin. Excess beyond the recipe's needs stays in the bin for future crafts.
+2. **Work** (`working` phase). Subtract recipe inputs from bins, begin work action. On completion, finished goods go into `unit.carrying` via `resources.produceIntoCarrying`.
 3. **Continuation check.** If `unit:carryableAmount(output_type) >= recipe output amount` AND inputs are available in the bins for another cycle, go to step 2 (no source-fetch needed mid-claim — bins already have what's needed).
-4. **Deposit tail phase.** When carry can't hold more output, OR bins are empty for the next cycle, route to nearest storage with capacity, deposit. Activity completes. The worker's `onActionComplete` then runs the on-completion poll (HAULING.md Worker Polling) and may re-claim the same workplace immediately, with a fresh source-fetch head phase if bins still need refilling.
+4. **Deposit** (`to_storage` phase). When carry can't hold more output, OR bins are empty for the next cycle, route to nearest storage with capacity, deposit. Activity completes. The worker's `onActionComplete` then runs the on-completion poll (HAULING.md Worker Polling) and may re-claim the same workplace immediately, with a fresh source-fetch if bins still need refilling.
 
 Carrying stays single-type — the worker deposits finished goods before any next claim begins a new fetch cycle. No mixed-type carrying.
 
-`#posted_activity_ids < worker_limit` remains the building's posting condition. The activity stays in `posted_activity_ids` from claim through to completion of the deposit tail phase, preserving the workplace slot throughout.
+`#posted_activity_ids < worker_limit` remains the building's posting condition. The activity stays in `posted_activity_ids` from claim through to completion of the deposit step, preserving the workplace slot throughout.
 
 FARMING WORK CYCLE
 
@@ -316,10 +314,10 @@ Planting:
 Harvest:
 
 1. Pick next eligible tile, travel to it, harvest (work action, duration from `CropConfig[crop].harvest_ticks`).
-2. Crop goes into `unit.carrying` (via `resources.carryResource`).
+2. Crop goes into `unit.carrying` (via `resources.produceIntoCarrying`).
 3. More eligible tiles AND carrying has room for next tile's expected yield → go to step 1.
 4. More eligible tiles BUT carrying would overflow → drop via ground drop search from the unit's current position (see ECONOMY.md Ground Piles), go to step 1.
-5. No more eligible tiles → deposit phase: route to nearest storage with capacity, deposit, return to farm (see HAULING.md Self-deposit primary phase).
+5. No more eligible tiles → transition to `to_storage`: route to nearest storage with capacity, deposit (see HAULING.md Self-deposit). Activity completes. If eligible tiles remain on the farm, the farm reposts a new harvest activity and the worker typically re-claims via the on-completion poll (see HAULING.md Worker Polling).
 
 Ground piles dropped on farm tiles during harvest self-post cleanup requests. Haulers convert and clear them in parallel while farmers keep harvesting (see HAULING.md Ground pile cleanup). During "Harvest Now" panic, the farm fills with scattered piles and haulers scramble.
 
@@ -339,11 +337,11 @@ The sleep activity is a private activity posted and claimed atomically when an e
 
 CONSTRUCTION WORK CYCLE
 
-On building placement: the building is created with `phase = "constructing"` (P1) or `phase = "blueprint"` (P2, when clearable obstructions exist on footprint tiles — see WORLD.md Placement Validation). A `construction` sub-table is populated — one bin per `build_cost` type, each sized to the exact required amount. For player-sized buildings, total build time is computed as `build_ticks_per_tile * tile_count` and stored on `construction.build_ticks`. Fixed-size buildings copy `build_ticks` from BuildingConfig directly. The builder reads `construction.build_ticks` regardless of building type.
+On building placement: the building is created with `construction_state = "constructing"` (P1) or `construction_state = "blueprint"` (P2, when clearable obstructions exist on footprint tiles — see WORLD.md Placement Validation). A `construction` sub-table is populated — one bin per `build_cost` type, each sized to the exact required amount. For player-sized buildings, total build time is computed as `build_ticks_per_tile * tile_count` and stored on `construction.build_ticks`. Fixed-size buildings copy `build_ticks` from BuildingConfig directly. The builder reads `construction.build_ticks` regardless of building type.
 
-All footprint tiles are immediately claimed (`tile.building_id` set) and impassable (subject to A* exemption for blueprint phase — see WORLD.md A* Building Exemption).
+All footprint tiles are immediately claimed (`tile.building_id` set) and impassable (subject to A* exemption for blueprint state — see WORLD.md A* Building Exemption).
 
-**Blueprint phase (P2).** When a building is placed with clearable obstructions (trees, berry bushes, ground piles) on its footprint, it enters blueprint phase. Clearing activities are posted into `posted_activity_ids`: one chop activity per tree, one clear activity per berry bush (P3). Ground piles on footprint tiles already self-post their own cleanup requests (see HAULING.md Ground pile cleanup) — no additional posting needed for them. A build activity is also posted. Construction delivery requests are NOT posted during blueprint phase.
+**Blueprint state (P2).** When a building is placed with clearable obstructions (trees, berry bushes, ground piles) on its footprint, it enters blueprint state. Clearing activities are posted into `posted_activity_ids`: one chop activity per tree, one clear activity per berry bush (P3). Ground piles on footprint tiles already self-post their own cleanup requests (see HAULING.md Ground pile cleanup) — no additional posting needed for them. A build activity is also posted. Construction delivery requests are NOT posted during blueprint state.
 
 **Unit displacement on blueprint placement (P2).** On placement, iterate all footprint tiles. For each tile, check `tile.target_of_unit`. Any unit whose `target_tile` is on a footprint tile is displaced: release their `target_tile` claim, flood fill outward from the unit's current position using the A* building exemption to find a free tile, claim the new tile, and repath. Units whose position is on a footprint tile but whose `target_tile` is outside the footprint are already leaving and need no intervention.
 
@@ -356,17 +354,17 @@ All footprint tiles are immediately claimed (`tile.building_id` set) and impassa
 
 **Blueprint → constructing transition.** When all clearing activities for a building are complete and no units remain on any footprint tile, the building transitions from `"blueprint"` to `"constructing"`. Construction delivery requests for all `build_cost` types are posted at this point (see HAULING.md Construction delivery). Requests live in `world.requests`; the building tracks them on `posted_request_ids` so deletion cleanup can remove them.
 
-**Builder cycle.** The builder checks the building's phase remotely before deciding where to path:
+**Builder cycle.** The builder checks the building's `construction_state` remotely before deciding where to path:
 
 1. **If blueprint (P2):** Check for unclaimed clearing activities on this building. If any, claim the highest-priority one and execute the clearing sequence (see above). Repeat until no clearing activities remain.
 2. **If constructing:** Check each `construction.bins` type: `needed = build_cost[type] - bin_contents - bin_reserved_in`. If needed > 0 for any type AND the corresponding construction delivery request still has `requested_amount > 0`, the builder can claim a trip directly off the request and act as a hauler for it (path to the nearest stockpile with available stock of that type, convert the request into a concrete trip activity, pick up, deliver to building). If `requested_amount == 0` for every type but bins aren't full yet (deliveries in transit by other haulers), path to building and wait at site (adjacent-to-rect). When all materials are present, begin work action at building. `construction.progress` only advances while bins contain all required materials.
-3. On completion: bin contents are consumed, `construction` is set to nil, `phase` is set to `"complete"`, footprint tiles activate their building roles and the clearing is registered (see WORLD.md Construction Phases).
+3. On completion: bin contents are consumed, `construction` is set to nil, `construction_state` is set to `"complete"`, footprint tiles activate their building roles and the clearing is registered (see WORLD.md Construction States).
 
 When `build_cost` is empty (stockpiles), the construction sub-table has no bins and progress advances unconditionally — just the builder working through `build_ticks`.
 
-**Sub-table initialization on completion.** When `phase` transitions to `"complete"`, category-specific sub-tables are populated. `production.input_bins` (processing buildings): one bin per unique input resource type across the building's recipes, with capacity from BuildingConfig. `housing.bins` (housing buildings): one bin per food type from HousingBinConfig. `market.last_delivered` (market): keyed by MerchantConfig food types, all starting at 0.
+**Sub-table initialization on completion.** When `construction_state` transitions to `"complete"`, category-specific sub-tables are populated. `production.input_bins` (processing buildings): one bin per unique input resource type across the building's recipes, with capacity from BuildingConfig. `housing.bins` (housing buildings): one bin per food type from HousingBinConfig. `market.last_delivered` (market): keyed by MerchantConfig food types, all starting at 0.
 
-**P1 vs P2 differences.** The entire construction system — blueprint phase, material delivery, builder cycle — is P2+. In P1, buildings are placed instantly as `"complete"` with no construction sub-table and no build activities. The P2 optimization of checking bins remotely and pathing directly to the stockpile applies only in P2.
+**P1 vs P2 differences.** The entire construction system — blueprint state, material delivery, builder cycle — is P2+. In P1, buildings are placed instantly as `"complete"` with no construction sub-table and no build activities. The P2 optimization of checking bins remotely and pathing directly to the stockpile applies only in P2.
 
 OFFLOADING
 
@@ -397,7 +395,7 @@ Soft and hard need interrupts for satiation are gated on availability — the in
 
 **Hard overrides soft:** If a soft interrupt is pending and a hard interrupt fires before the unit reaches a clean break, the hard interrupt takes priority — cancel everything, drop resources, release all state. `soft_interrupt_pending` is cleared as part of the hard interrupt path. The hard interrupt then posts the same private need activity — the difference is the cleanup (hard drops and releases immediately), not the destination.
 
-Need activities are private — posted and claimed atomically by the unit, never visible to other workers. They occupy `activity_id` like any other primary activity. All existing cleanup paths (death, draft, building deletion) handle need activities through the standard `activity_id` cleanup with no special-casing.
+Need activities are private — posted and claimed atomically by the unit, never visible to other workers. They occupy `activity_id` like any other activity. All existing cleanup paths (death, draft, building deletion) handle need activities through the standard `activity_id` cleanup with no special-casing.
 
 SLEEP
 
@@ -434,29 +432,37 @@ EATING BEHAVIOR
 
 When a unit eats at home, it consumes food from the home building's `housing.bins`. Each food type has a `nutrition` value in ResourceConfig representing how much satiation it restores.
 
-**Pre-travel reservation:** Before traveling home to eat, the unit reserves one food item at the home bin (`reserved_out`). This prevents a housemate from consuming the food during transit. The reservation is held on the eat activity itself (which occupies `activity_id` — see HAULING.md Eating trip).
+The eat activity has its own four-phase state machine (`to_consumption_site`, `fetching_food_to_source`, `fetching_food_returning`, `consuming`). Transport legs (`fetching_food_to_source`, `fetching_food_returning`) use standard source and destination reservations. Consumption legs (`to_consumption_site`, `consuming`) place no reservations — per-iteration `getAvailableStock` checks during the consumption loop respect every other system's reservations without needing to place their own. See HAULING.md Eating Trip for the full state machine, post-time path selection, reservation timing, and consumption loop.
 
-**Empty home on arrival:** If the home has no food on arrival, the eat handler transitions the eat activity into a source-fetch phase (the home food self-fetch sub-step — see HAULING.md). The unit resolves the nearest food source, reserves source-side stock atomically, travels, picks up, returns home, then enters the consumption loop. This is a phase transition within the eat activity, not a separate activity.
+**Post-time path selection:** When the eat activity is posted (from a hard or soft satiation interrupt, or from the per-hash idle fast path), the posting site checks the home's bins to pick the right starting phase:
 
-**Consumption loop (per iteration):** The unit selects a food type, reserves one item of that type on the housing bin (`reserved_out`), withdraws and consumes it (decrement the food stack's amount by 1; destroy the stack entity if amount reaches 0). The reservation clears as part of the withdraw. Update `unit.last_ate[type]` to the current tick. Check if eating another item of any available type would exceed 100 satiation — if so, stop. Otherwise repeat with a fresh selection.
+- `home_id` set AND home bins contain food → start in `"to_consumption_site"` heading home.
+- `home_id` set AND home bins empty → start in `"fetching_food_to_source"`, resolving the nearest food source. Skip the futile trip home.
+- `home_id` nil → homeless path; see Homeless Eating below.
 
-**Food selection (per iteration):** The unit prefers the food type it has eaten least recently (oldest `last_ate` value, or nil). This naturally rotates through available types, supporting the food variety mood bonus. The unit scans housing bins that contain unreserved food stack entities and selects based on `last_ate`.
+**Food selection (per consumption iteration):** The unit prefers the food type it has eaten least recently (oldest `last_ate` value, or nil). This naturally rotates through available types, supporting the food variety mood bonus. The unit scans bins that contain food with available stock and selects based on `last_ate`.
 
 **Food variety mood:** During mood recalculation, count how many distinct food types have `last_ate` within `FOOD_VARIETY_WINDOW` (3 days). Each type beyond the first grants `food_variety_bonus` (+5). No penalty for lack of variety, only a bonus for achieving it.
 
+**Races between housemates (consumption only):** Two housemates arriving home simultaneously both see food, both enter `"consuming"`. Whichever iterates first withdraws what's there; the loser's next iteration finds no stock and the consuming loop falls back to `"fetching_food_to_source"` (which then places standard reservations for the fetch). The wasted trip (unit walked home, found empty bins, now walks to stockpile) is the cost of the consumption-side carve-out. Acceptable because housemate races are rare in practice and the fallback handles them without special-casing. Fetch legs don't race — reservations serialize them.
+
 HOMELESS EATING
 
-When a satiation interrupt fires and `home_id` is nil, the unit eats directly from the nearest available food source rather than from housing bins.
+When a satiation interrupt fires and `home_id` is nil, the unit eats directly from the nearest available food source rather than from housing bins. The eat activity is posted in `"to_consumption_site"` with destination = the resolved source.
 
-**Source priority:** Tavern (if exists, stocked with food, and open for the evening) → nearest storage building with unreserved food (stockpile or warehouse).
+**Source priority:** Tavern (if exists, stocked with food, and open for the evening) → nearest storage building with food whose `getAvailableStock` is > 0 (stockpile or warehouse). Reservations placed by other systems (filter pull haulers, merchants, self-fetch) hide their claimed stock from this check, so homeless eaters never target food that's already spoken for.
 
-**Mechanism:** Same consumption loop as home eating, but targeting a different container. The unit reserves one food item at the source (`reserved_out`) before traveling, eats from the container on arrival, and follows the same food selection and consumption rules. The reservation is held on the eat activity itself (which occupies `activity_id` — see HAULING.md Eating trip). Reservations release on pickup or on death/interrupt cleanup.
+**Consumption at the source:** Same per-iteration loop as eating at home. The unit reads `getAvailableStock` for each food type, withdraws 1 of the selected type if any has stock, consumes, repeats until full or out of reachable food. No reservations are placed by the homeless eater at any point.
+
+**Source switching:** When the current source runs out mid-meal and the unit isn't full, the consuming loop resolves the next nearest food source and transitions back to `"to_consumption_site"` pointing at it. This means a homeless unit will eat across multiple stockpiles in one activity if needed to reach full satiation — matching the eat-until-full behavior of housed units.
+
+**Races between homeless units:** Two homeless units walking to the same stockpile both see stock at `getAvailableStock` check time. The loser's per-iteration check finds nothing (single-threaded Lua guarantees the winner's `withdraw` happens-before the loser's check), and the consuming loop falls back to switching sources. Same fallback as the housemate race, different trigger.
 
 Homeless eating is inherently less efficient than eating at home — shared food sources, potentially longer travel, competition with other homeless units.
 
 WORK DAY AND RECREATION
 
-Units have a configurable work day length (10, 11, or 12 hours), set per-unit by the player in the work priority menu. The work day is tracked by `work_ticks_remaining`, a counter that decrements once per tick when the unit's primary activity has `purpose == "work"` (see per-tick loop step 2). Interrupt and recreation activities do not decrement it.
+Units have a configurable work day length (10, 11, or 12 hours), set per-unit by the player in the work priority menu. The work day is tracked by `work_ticks_remaining`, a counter that decrements once per tick when the unit's activity has `purpose == "work"` (see per-tick loop step 2). Interrupt and recreation activities do not decrement it.
 
 **Daily reset:** At `WORK_DAY_RESET_HOUR` (4am), `work_ticks_remaining` is set to the unit's configured work hours (converted to ticks) and `is_done_working` is set to false. The reset fires regardless of unit state — sleeping, awake, or drafted. This synchronizes all units to the same daily clock.
 
@@ -492,21 +498,21 @@ The tavern combines the evening meal and recreation into one efficient trip.
 
 CARRYING
 
-`unit.carrying` is a flat array of entity ids — both stack entity ids and item entity ids. Total carried weight is `resources.countWeight(unit.carrying)`. `CARRY_WEIGHT_MAX = 32` is the hard cap — same for all units except the merchant (see MerchantConfig). `unit:carryableAmount(type)` returns how many more of a given type the unit can pick up by weight.
+`unit.carrying` is a flat array of entity ids — both stack entity ids and item entity ids. Total carried weight is `resources.countWeight(unit.carrying)`. `CARRY_WEIGHT_MAX = 32` is the hard cap, uniform across all units. `unit:carryableAmount(type)` returns how many more of a given type the unit can pick up by weight.
 
 Weight governs both carrying and storage density. Resources have a `weight` field; containers have a `capacity` field. The same `weight` value determines how many units fit in a carry load and how many fit on a stockpile tile.
 
-Carrying is always single-type. Activity handlers naturally produce single-type loads (a woodcutter carries wood, a hauler claims one trip for one type, a merchant selects one food type per delivery run). Processing workers who need to switch from carrying output to fetching input deposit first via the deposit tail phase, then any next claim begins a fresh fetch cycle. No exceptions.
+Carrying is always single-type. Activity handlers naturally produce single-type loads (a woodcutter carries wood, a hauler claims one trip for one type, a merchant selects one food type per delivery run). Processing workers who need to switch from carrying output to fetching input deposit first via the `to_storage` step, then any next claim begins a fresh fetch cycle. No exceptions.
 
 Strength affects carrying speed penalty, not capacity — see WORLD.md Movement Speed for the formula.
 
-Workers transport resources as part of their primary work cycle. This is distinct from dedicated hauling activities.
+Workers transport resources as part of their work cycle. This is distinct from dedicated hauling activities.
 
-When a handler starts and the unit is carrying resources wrong for the current work, the handler routes the unit to offload first (see HAULING.md Offloading). If carrying resources valid for the new work, skip to the work phase.
+When a handler starts and the unit is carrying resources wrong for the current work, the handler routes the unit to offload first (see HAULING.md Offloading). If carrying resources valid for the new work, skip to the `working` phase.
 
 DRAFTING
 
-Drafted units (`unit.is_drafted = true`) skip activity polling, need interrupts, and any haul-related work cycle phases (source-fetch, deposit). Needs still drain. Player issues move commands; the command system fans destinations to adjacent tiles so each drafted unit receives a unique `target_tile`. Mid-activity when drafted → abandon (progress persists, claim cleared, reservations released per HAULING.md Cleanup). Energy hits 0 → auto-undraft + collapse on the spot (see Sleep). Undrafting resumes normal behavior on next hashed update. Resources carried when drafted are kept — no ground drop on draft. On undraft, if the unit is still carrying, the next `onActionComplete` routes to offloading.
+Drafted units (`unit.is_drafted = true`) skip activity polling, need interrupts, and any haul-related work cycle steps (source-fetch, deposit). Needs still drain. Player issues move commands; the command system fans destinations to adjacent tiles so each drafted unit receives a unique `target_tile`. Mid-activity when drafted → abandon (progress persists, claim cleared, reservations released per HAULING.md Cleanup). Energy hits 0 → auto-undraft + collapse on the spot (see Sleep). Undrafting resumes normal behavior on next hashed update. Resources carried when drafted are kept — no ground drop on draft. On undraft, if the unit is still carrying, the next `onActionComplete` routes to offloading.
 
 Units with energy below the hard threshold cannot be drafted. They're already exhausted enough that they would auto-undraft on the next interrupt check anyway — blocking the draft up front avoids a wasted command.
 
@@ -546,7 +552,7 @@ A specialty is a career — "baker," "smith," "priest." It determines what kind 
 
 **Assignment:** Player promotes a serf to freeman and assigns a specialty (e.g., "baker"). The unit's `unit.specialty` is set. The unit now searches the activity queue for matching work.
 
-**Dynamic work-finding:** Specialty workers do not have a permanent building assignment. When idle, they poll the activity queue for activities matching their specialty. Buildings post specialty activities when they have work available and an open slot (`#posted_activity_ids < worker_limit`). The worker claims the activity and paths to the building (or to a source first, if the activity has a source-fetch head phase per HAULING.md). On completion or when no more work is available, the worker polls again. The worker's `activity_id` claim is their slot reservation — it stays set through the entire activity including any head/tail phases, preventing the building from double-posting while the worker is away.
+**Dynamic work-finding:** Specialty workers do not have a permanent building assignment. When idle, they poll the activity queue for activities matching their specialty. Buildings post specialty activities when they have work available and an open slot (`#posted_activity_ids < worker_limit`). The worker claims the activity and paths to the building (or to a source first, if the activity has a source-fetch step per HAULING.md). On completion or when no more work is available, the worker polls again. The worker's `activity_id` claim is their slot reservation — it stays set through the entire activity including any source-fetch or deposit steps, preventing the building from double-posting while the worker is away.
 
 **Revocation:** Most specialties are revocable with a mood penalty. Clergy specialties: irrevocable (see Promotion Paths).
 

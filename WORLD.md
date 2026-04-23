@@ -1,5 +1,5 @@
 # Sovereign — WORLD.md
-*v13 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
+*v14 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
 
 ## Map
 
@@ -97,8 +97,8 @@ Impassable tiles:
 
 - Rock, water (unless overridden by a building role — see below)
 - Impassable building tiles (X)
-- Blueprint tiles (`phase == "blueprint"`): impassable unless the A* building exemption applies (see A* Building Exemption)
-- Constructing tiles (`phase == "constructing"`): impassable unless the A* building exemption applies
+- Blueprint tiles (`construction_state == "blueprint"`): impassable unless the A* building exemption applies (see A* Building Exemption)
+- Constructing tiles (`construction_state == "constructing"`): impassable unless the A* building exemption applies
 
 **Building role overrides terrain.** An I or D tile on rock/water is pathable (docks, mines). An X tile on grass is impassable. Building role wins for the duration of the building's lifetime; on deletion, terrain reasserts.
 
@@ -156,7 +156,7 @@ A* BUILDING EXEMPTION
 
 A* accepts an optional `exempt_building_id` parameter. When set, for the duration of that query:
 
-- All tiles with `building_id == exempt_building_id` are treated as pathable (regardless of phase or `building_role`)
+- All tiles with `building_id == exempt_building_id` are treated as pathable (regardless of `construction_state` or `building_role`)
 - Same-building connectivity checks (`indoor ↔ indoor`, `indoor ↔ door`) pass for tiles belonging to the exempt building even if they would otherwise fail the building_id equality check
 - The `door ↔ clearing` check passes for the exempt building's door and clearing
 
@@ -327,8 +327,8 @@ PLACEMENT VALIDATION
 - The derived clearing tile must be on a pathable outdoor tile — no rock, no water, no other building's footprint. Clearing-on-clearing overlap is allowed (the new building simply joins the existing clearing claim on that tile).
 - The door tile must be on the perimeter of the footprint (validated on the BuildingConfig, not per placement)
 - **Unit occupancy (P1):** any footprint tile with `target_of_unit ~= nil` or `#tile.unit_ids > 0` is invalid. In P2, units are displaced on placement instead of blocking — see BEHAVIOR.md Construction Work Cycle for the displacement sweep.
-- **Plants (P1):** any footprint tile with `tile.plant_type ~= nil` is invalid. In P2, trees become clearable obstructions — the building enters blueprint phase and clearing activities are posted. Berry bush clearing comes online in P3.
-- **Ground piles (P1):** any footprint tile with `tile.ground_pile_id ~= nil` is invalid. In P2, ground piles become clearable obstructions — the building enters blueprint phase and clearing haul activities are posted.
+- **Plants (P1):** any footprint tile with `tile.plant_type ~= nil` is invalid. In P2, trees become clearable obstructions — the building enters the blueprint state and clearing activities are posted. Berry bush clearing comes online in P3.
+- **Ground piles (P1):** any footprint tile with `tile.ground_pile_id ~= nil` is invalid. In P2, ground piles become clearable obstructions — the building enters the blueprint state and clearing haul activities are posted.
 - **Solid buildings** have no door — all tiles are X. Only the terrain requirement and the no-overlap rules apply; clearing validation is skipped.
 
 EDGE BUILDINGS
@@ -340,23 +340,23 @@ Fishing docks and mines have row-based terrain requirements relative to orientat
 
 Edge buildings transform impassable terrain (water, rock) under their footprint into passable indoor/door space via the building role override.
 
-CONSTRUCTION PHASES
+CONSTRUCTION STATES
 
-Buildings progress through three phases: `"blueprint"` → `"constructing"` → `"complete"`.
+Buildings progress through three `construction_state` values: `"blueprint"` → `"constructing"` → `"complete"`. The `construction_state` field persists for the building's lifetime — `"complete"` is the terminal value, not a nilled field.
 
-**Blueprint (P2 only).** The building has been placed but the site has not been cleared. Footprint tiles are impassable to most units, but units with the A* building exemption for this building can path through. Clearing activities (chop for trees, clear for berry bushes, haul for ground piles) are posted into `posted_activity_ids`. Construction material haul activities are NOT posted during this phase — they post on transition to constructing. The blueprint transitions to constructing when all clearing activities are complete and no units remain on footprint tiles. See BEHAVIOR.md Construction Work Cycle for clearing behavior, activity flow, and unit displacement.
+**Blueprint (P2 only).** The building has been placed but the site has not been cleared. Footprint tiles are impassable to most units, but units with the A* building exemption for this building can path through. Clearing activities (chop for trees, clear for berry bushes, haul for ground piles) are posted into `posted_activity_ids`. Construction material haul activities are NOT posted in this state — they post on transition to constructing. The blueprint transitions to constructing when all clearing activities are complete and no units remain on footprint tiles. See BEHAVIOR.md Construction Work Cycle for clearing behavior, activity flow, and unit displacement.
 
 **Constructing.** All footprint tiles are impassable (with the same exemption semantics as blueprint). Construction material haul activities and the build activity are posted. Builder delivers materials and builds. See BEHAVIOR.md Construction Work Cycle.
 
 **Complete.** Footprint tiles activate their building roles — I and D tiles become pathable per edge connectivity rules, X tiles remain impassable. The clearing tile flag is set. The building is operational.
 
-**P1 behavior:** Buildings are placed instantly as `"complete"` — no construction phase, no `build_cost` consumed, no build activities posted. On placement, footprint tiles are claimed (`tile.building_id` and `tile.building_role` set) and the clearing is registered (`building.clearing_tile` set, `tile.is_clearing = true`). The `build_cost` and `build_ticks` values in BuildingConfig exist for P2 when the construction system comes online. In P2, buildings with clearable obstructions on their footprint enter blueprint phase; buildings on clear sites are placed as `"constructing"`.
+**P1 behavior:** Buildings are placed instantly as `"complete"` — no construction sequence, no `build_cost` consumed, no build activities posted. On placement, footprint tiles are claimed (`tile.building_id` and `tile.building_role` set) and the clearing is registered (`building.clearing_tile` set, `tile.is_clearing = true`). The `build_cost` and `build_ticks` values in BuildingConfig exist for P2 when the construction system comes online. In P2, buildings with clearable obstructions on their footprint enter the blueprint state; buildings on clear sites are placed as `"constructing"`.
 
 BUILDINGS WITHOUT TILE MAPS
 
 **Stockpiles:** Open area, every tile is a storage entry in the tile inventory. No walls, no door, no tile map. All footprint tiles are outdoor — no building_role set — and remain directly accessible. `tile.building_id` is set to associate the tile with the stockpile for storage purposes, but `building_role` remains nil, so the tile participates in outdoor connectivity as usual.
 
-**Farms:** Player-sized open passable area. No wall/floor model. See ECONOMY.md Frost and Farming for per-tile crop state and farm controls. Farms go through the blueprint phase in P2 when obstructions exist on footprint tiles.
+**Farms:** Player-sized open passable area. No wall/floor model. See ECONOMY.md Frost and Farming for per-tile crop state and farm controls. Farms go through the blueprint state in P2 when obstructions exist on footprint tiles.
 
 SOLID BUILDINGS
 
