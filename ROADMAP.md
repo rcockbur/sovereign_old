@@ -1,5 +1,5 @@
 # Sovereign — ROADMAP.md
-*v8 · Project planning: phase scope, pending design items, implementation milestones, decisions, and tasks.*
+*v11 · Project planning: phase scope, pending design items, implementation milestones, decisions, and tasks.*
 
 ## Implementation State
 
@@ -65,7 +65,7 @@ Docs: UI.md § Selection, Left Panel, P1 Implementation (Debug Dump).
 Verify: Click a unit → see full unit table in left panel (name, needs values, position, etc.). Click a tile → see tile data (terrain, plant_type, plant_growth). Values update in real time as the simulation runs.
 
 **p1m08 — Pathfinding** (M)
-A* implementation with binary heap open list. Two modes: destination (goal = specific tile) and adjacent-to-rect (goal = any unclaimed pathable orthogonal neighbor of a rectangle). Octile heuristic. Tile costs from WORLD.md (grass=6, trees=18, water/rock=impassable). Diagonal movement allowed when both orthogonal neighbors passable, cost = √2 × tile cost. Returns path as `{ tiles = { idx1, idx2, ... }, current = 1 }` or nil on failure.
+A* implementation with binary heap open list. Two modes: destination (goal = specific tile) and adjacent-to-rect (goal = any unclaimed pathable orthogonal neighbor of a rectangle). Octile heuristic. Tile costs and passability from WORLD.md § Tile Base Cost. Diagonal movement allowed when both orthogonal neighbors passable, cost = √2 × tile cost. Returns path as `{ tiles = { idx1, idx2, ... }, current = 1 }` or nil on failure.
 Docs: WORLD.md § Pathfinding (all subsections: tile costs, heuristic, modes, adjacent-to-rect heuristic).
 Verify: Write tests in `tests/` — optimal path on open grass, path around water, path through trees (higher cost), no path to isolated tile returns nil, adjacent-to-rect finds nearest neighbor, diagonal blocked when orthogonal neighbor impassable.
 
@@ -85,8 +85,8 @@ Docs: BEHAVIOR.md § Tick Order, Per-Unit Update loops (structure only).
 Verify: Game time advances. Units stand in place. Dev overlay TPS shows ticks firing. Speed changes affect tick rate. Selecting a unit shows `current_action = { type = "idle" }` in debug dump.
 
 **p1m12 — Stockpile placement** (M)
-Building data structure (P1 fields). Stockpile: no tile map, open area, player-sized (drag to define area). Placement mode: temporary debug key enters placement mode, click-drag to define rectangle, release to place. Placement validation: all tiles must be grass or dirt, no existing buildings, no water/rock. Ghost preview during placement (green=valid, red=invalid tiles). Instant placement in P1 — `phase = "complete"` immediately. `tile.building_id` set on all footprint tiles. Render stockpiles as a distinct ground color. Building selection + debug dump.
-Docs: WORLD.md § Construction Phases (P1 behavior), Placement Validation, Buildings Without Tile Maps. TABLES.md § building data structure, BuildingConfig (stockpile). UI.md § Building placement.
+Building data structure (P1 fields). Stockpile: no tile map, open area, player-sized (drag to define area). Placement mode: temporary debug key enters placement mode, click-drag to define rectangle, release to place. Placement validation: all tiles must be grass or dirt, no existing buildings, no water/rock. Ghost preview during placement (green=valid, red=invalid tiles). Instant placement in P1 — `construction_state = "complete"` immediately. `tile.building_id` set on all footprint tiles. Render stockpiles as a distinct ground color. Building selection + debug dump.
+Docs: WORLD.md § Construction States (P1 behavior), Placement Validation, Buildings Without Tile Maps. TABLES.md § building data structure, BuildingConfig (stockpile). UI.md § Building placement.
 Verify: Enter placement mode, drag a 4×3 area on grass → stockpile appears. Can't place on water/rock/trees. Select stockpile → see building table in debug dump. Place a second stockpile → both exist. Tiles under stockpile show `building_id` in tile inspector.
 
 **p1m13 — Resources + stockpile storage** (M)
@@ -116,7 +116,7 @@ Verify: Designate berry bushes. Units gather berries, bushes visually shrink (st
 
 **p1m17b — Building pathing model refactor** (M)
 Replace the wall-ring building model with edge-based connectivity. New tile fields: `building_role` (nil | "indoor" | "door" | "impassable"), `is_clearing` (bool). New building field: `clearing_tile` (flat tile index, derived at placement from door position and orientation). Tile_map symbols migrate from `W/F/D` to `I/D/X`. A\* rewritten to evaluate edges via `getEdgeCost(from_idx, to_idx)` checking the connectivity table: indoor↔indoor and indoor↔door require same `building_id`; door↔clearing requires `clearing_tile` match on the door's building; clearing↔outdoor, clearing↔clearing, and outdoor↔outdoor are unconditional. Diagonal corner-clip prevention now falls out of the edge rules rather than a tile-passability check. Placement validation updated: footprint cannot overlap existing `building_id`, cannot fall on existing `is_clearing`, derived clearing must land on pathable outdoor. `is_solid` flag dropped — solidity is now a property of the tile_map (no D → solid). Config validation updated to match new invariants. Migrate existing BuildingConfig entries (cottage, fishing_dock, woodcutters_camp, gatherers_hut, herbalists_hut) to I/D/X and update their dimensions where footprint shrinks. Rendering: walls drawn as outlines between indoor and outdoor tiles, not as grid entities.
-Docs: WORLD.md § Pathfinding (edge connectivity, A\* building exemption, pathfinding integration), Building Layout (tile types, tile map, clearing, placement validation, construction phases, solid buildings). TABLES.md § tile, building, BuildingConfig. CLAUDE.md § Constants, Config Validation. BEHAVIOR.md § Construction Work Cycle (completion step).
+Docs: WORLD.md § Pathfinding (edge connectivity, A\* building exemption, pathfinding integration), Building Layout (tile types, tile map, clearing, placement validation, construction states, solid buildings). TABLES.md § tile, building, BuildingConfig. CLAUDE.md § Constants, Config Validation. BEHAVIOR.md § Construction Work Cycle (completion step).
 Verify: Existing playable scope (chop, gather, haul, spawn) works unchanged. Dev-spawn a cottage — units path in through the door, cannot enter through walls, diagonal clip through doorway blocked. Dev-spawn two cottages face-to-face with 1 tile between — both buildings' clearings register on the shared tile, units walk past freely. Dev-spawn a fishing dock — unit paths across deck to workstation over water. Dev-spawn a solid building (woodcutter's camp) — units cannot path onto any footprint tile, path adjacent-to-rect instead. Delete a building — tiles return to terrain-based pathing, shared clearing tiles stay flagged if another building still claims them. Run existing pathfinding tests — they pass with the new edge-based `getEdgeCost`.
 
 **p1m18 — Energy + sleep** (M)
@@ -145,14 +145,14 @@ Docs: WORLD.md § Building Layout (edge buildings, door face). BEHAVIOR.md § Ga
 Verify: Place fishing dock with back on water, front on land. Rejects placement if water requirement not met. Worker produces fish in a loop. Fish deposited at stockpile. Fish visible in resource counts as food.
 
 **p1m23 — Satiation + eating** (M)
-Satiation drain in per-hash loop step 1. Satiation interrupts (soft at 75, hard at 15) — availability-gated: only fires if food exists in storage (check `resource_counts.storage` for any food type). Hard interrupt: drop, release, post private eat activity. Soft interrupt: same deferred/direct pattern as energy. Eat activity is a four-phase state machine (`to_food_source`, `fetching_food_to_source`, `fetching_food_returning`, `consuming`) with no reservations placed at any point. Post-time path selection: home with food → start in `to_food_source`; home with empty bins → start in `fetching_food_to_source` (skip the futile trip); homeless → start in `to_food_source` heading to nearest stockpile. Consumption loop reads `getAvailableStock` per iteration (respects other systems' reservations), withdraws 1 of the least-recently-eaten available type (`unit.last_ate`), repeats until full or no food. Empty container mid-meal triggers fallback: eat-at-home transitions to `fetching_food_to_source`; homeless resolves next nearest source and transitions to `to_food_source`. Source/destination rewritten on phase transitions. No food anywhere → activity completes, satiation drains.
+Satiation drain in per-hash loop step 1. Satiation interrupts (soft at 75, hard at 15) — availability-gated: only fires if food exists in storage (check `resource_counts.storage` for any food type). Hard interrupt: drop, release, post private eat activity. Soft interrupt: same deferred/direct pattern as energy. Eat activity is a four-phase state machine (`to_consumption_site`, `fetching_food_to_source`, `fetching_food_returning`, `consuming`). Transport legs (`fetching_food_to_source`, `fetching_food_returning`) use standard source and destination reservations; consumption legs (`to_consumption_site`, `consuming`) place no reservations. Post-time path selection: home with food → start in `to_consumption_site`; home with empty bins → start in `fetching_food_to_source` (skip the futile trip); homeless → start in `to_consumption_site` heading to nearest stockpile. Fetch-leg selection: resolve nearest storage with available stock of any food type → at that source, select the food type with the most available stock (tiebreaker: HousingBinConfig order). Consumption loop reads `getAvailableStock` per iteration (respects other systems' reservations), withdraws 1 of the least-recently-eaten available type (`unit.last_ate`, tiebreaker: HousingBinConfig order), repeats until full or no food. Empty container mid-meal triggers fallback: eat-at-home transitions to `fetching_food_to_source`; homeless resolves next nearest source and transitions to `to_consumption_site`. Source/destination rewritten on phase transitions. No food anywhere → activity completes, satiation drains.
 Docs: BEHAVIOR.md § Need Interrupts (satiation), Eating Behavior, Homeless Eating, Hauling (eating trip, home food self-fetch). TABLES.md § NeedsConfig (satiation), ResourceConfig (nutrition values), HousingBinConfig. ECONOMY.md § Resources Module.
 Verify: Units get hungry and eat. With a cottage, units walk home and eat from home bins. Home runs out → unit fetches food from stockpile to home. No cottage → unit eats directly from stockpile. No food anywhere → satiation drains to 0 (no interrupt fires). `last_ate` tracks food types. Food variety rotation visible in debug dump.
 
 **p1m24 — Health + starvation + death** (M)
-Health system: malnourishment when satiation == 0 — health drains per `MalnourishedConfig.health_drain`. Death when health ≤ 0: `unit.is_dead = true`. `units.sweepDead()` runs end-of-tick with full cleanup: convert to memory, update registry, social cleanup (stub — no relationships yet), target tile release, tile position cleanup, activity cleanup, ground pile drop (carried resources + equipped items), home cleanup (remove from housing), remove from `world.units` (swap-and-pop). Death notification with auto-pause. Starvation warning notification when satiation is low.
-Docs: BEHAVIOR.md § Unit Death Cleanup (all 12 steps). TABLES.md § MalnourishedConfig, memory data structure. UI.md § Notifications (death, starvation warning).
-Verify: Remove all food sources. Units starve: satiation hits 0, health drains, unit dies. Death notification appears and game pauses. Dead unit disappears from map. Carried resources drop as ground pile. Home bed freed. Other units continue. Memory entity exists in registry.
+Health system: malnourishment when satiation == 0 — health drains per `MalnourishedConfig.health_drain`. Death when health ≤ 0: `unit.is_dead = true`. `units.sweepDead()` runs end-of-tick with full cleanup: convert to memory, update registry, social cleanup (stub — no relationships yet), target tile release, tile position cleanup, activity cleanup, ground pile drop (carried resources + equipped items), home cleanup (remove from housing), remove from `world.units` (swap-and-pop).
+Docs: BEHAVIOR.md § Unit Death Cleanup (all 12 steps). TABLES.md § MalnourishedConfig, memory data structure.
+Verify: Remove all food sources. Units starve: satiation hits 0, health drains, unit dies. Dead unit disappears from map. Log line confirms death. Carried resources drop as ground pile. Home bed freed. Other units continue. Memory entity exists in registry.
 
 **p1m25 — Plant growth + spread** (S)
 Plant cursor scan: `SPREAD_TILES_PER_TICK` tiles per tick, linear wrap across full grid. Growth promotion: seedling → young (if enough ticks elapsed per `PlantConfig.seedling_ticks`, defer tree seedling→young if unit on tile), young → mature (per `PlantConfig.young_ticks`). `world.growing_plant_data[tileIndex]` tracks `planted_tick` for stages 1–2, removed on promotion to mature. Mature spread: roll `spread_chance`, place same type at random tile within `spread_radius` (manhattan distance). Safety: no spread adjacent to buildings, no spread onto tiles with `building_id`.
@@ -164,22 +164,17 @@ Delete command: select a building, press Del → `building.is_deleted = true`. `
 Docs: BEHAVIOR.md § Building Deletion (full cleanup sequence). UI.md § Command Bar (Delete).
 Verify: Place a stockpile with wood in it. Delete it → wood appears as ground pile on nearby tiles. Place cottage with residents → delete → residents become homeless, sleep on ground next night. Delete a building with a worker en route → worker goes idle.
 
-**p1m27 — Notifications** (S)
-Notification feed in right panel, newest at top. Each entry: event type + relevant name. P1 types: unit death (auto-pause), unit trapped (no pause), storage full (no pause), starvation warning (no pause). Click notification → center camera on source entity/position, select if living unit. Notifications accumulate and persist. Storage full triggers when a unit tries to deposit and no stockpile has capacity for that resource type. Trapped triggers when A* returns no path.
-Docs: UI.md § Notifications (P1 types, click behavior, auto-pause).
-Verify: Unit dies → notification appears, game pauses, click notification → camera centers on death location. Fill all stockpiles → "No storage has capacity for wood" appears. Surround a unit with buildings → "Serf X is trapped" appears.
-
-**p1m28 — Action bar + command bar + population list** (M)
+**p1m27 — Action bar + command bar + population list** (M)
 Action bar: persistent bottom bar with building placement buttons (Stockpile, Cottage, Woodcutter's Camp, Gatherer's Hut, Fishing Dock), designation buttons (Chop, Gather, Cancel Designation), and Population List button. Command bar: contextual buttons based on selection — Delete button when a building is selected. Population list: management overlay opened from action bar, sortable list of all units with name/class/needs summary. Escape to close.
 Docs: UI.md § Action Bar (P1 buttons), Command Bar (P1 commands), Management Overlays (Population List).
 Verify: All building placement and designation modes accessible from action bar buttons. Select building → Delete button appears in command bar. Open population list → see all units. Sort by name. Close with escape.
 
-**p1m29 — Debug spawn** (XS)
+**p1m28 — Debug spawn** (XS)
 F1 spawns a serf at cursor tile position. Shift+F1 spawns 5. Reject spawn on impassable tiles. Ring search outward if tile has `target_of_unit` set. Batch spawn places sequentially with ring search. Log each spawn.
 Docs: CLAUDE.md § Debug Spawn.
 Verify: F1 on grass → new unit appears. F1 on water → nothing happens. Shift+F1 → 5 units spread across nearby tiles. Log shows spawn messages.
 
-**p1m30 — Save/load** (M)
+**p1m29 — Save/load** (M)
 `core/save.lua`. Serialize `world` (all entity arrays, tiles, time, settings), `registry.next_id` as Lua table literals via `love.filesystem`. Versioned format. Deserialize rebuilds everything: registry hash table from all entity arrays, `resource_counts` via `rebuildCounts()`. F5 = quicksave to `saves/quicksave.lua`. F9 = quickload (ignored if no file). Quit-to-menu autosaves. Main menu "Continue" button appears when save file exists. Full teardown on quit-to-menu (clear `world` and `registry`).
 Docs: CLAUDE.md § Serialization, Save File Management (P1). TABLES.md § world data structure.
 Verify: Play for a few minutes, F5. Quit to menu. "Continue" appears → click → game resumes exactly where it was. Units in same positions, stockpiles with same contents, time at same point. F9 during play → reloads to last save. Corrupt save file → clear error message.
@@ -199,6 +194,7 @@ Development is organized into twelve phases. Each phase produces a qualitatively
 - Production order UI — building left panel controls for add/remove/reorder/configure
 - Specialty assignment / promotion UI — unit left panel controls for serf → freeman promotion and specialty selection
 - Worker limit adjustment UI — building left panel control
+- Notifications — feed in right panel, notification types and triggers, click-to-center, auto-pause rules
 
 **Phase 3 — Advanced Economy.** Farming and food processing transform the settlement's food supply. Farms follow the seasonal cycle — frost and thaw create yearly tension around crop selection and harvest timing. The bread chain (wheat → flour → bread) and brewery (barley → beer) come online. The tailor converts flax into plain clothing. A merchant at the market delivers food to homes, replacing manual self-fetch. The full metalworking chain arrives: the chopping block processes wood into firewood, the bloomery converts iron and firewood into steel, and the smithy gains steel tool production. Wood now competes between three uses: construction, firewood for warmth, and firewood for smelting. Firewood (processed from wood) fuels both home heating in winter and steel production at the bloomery.
 
@@ -215,7 +211,7 @@ Development is organized into twelve phases. Each phase produces a qualitatively
 *Pending:*
 - Ground drop UI — how to display multiple resource types on the same tile when overlap occurs
 - Herbalist's hut — deferred from Phase 1; herbs have no consumer until physician exists in Phase 4
-- Tavern — barkeep stocking schedule, patron capacity, beer consumption flow, diminishing returns formula for recreation recovery
+- Tavern — barkeep stocking schedule, patron capacity, food consumption mechanics (how units eat at the tavern: food selection, per-item timing, interaction with beer and recreation recovery), beer consumption flow, diminishing returns formula for recreation recovery
 - Apothecary mechanics — herb consumption, patient detection, physician travel logic
 - Trait config — mechanical values for Crippled (see BRAINSTORMING.md for Touched, Changeling)
 

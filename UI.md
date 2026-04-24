@@ -1,5 +1,5 @@
 # Sovereign — UI.md
-*v16 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
+*v18 · Player interface: camera, input, layout, selection, panels, overlays, notifications, interaction flows.*
 
 ## Camera
 
@@ -32,7 +32,7 @@ UI modules with mutable module-level state require an `init()` function that res
 
 INPUT ROUTING
 
-`ui.lua` resolves which layer owns the mouse once per frame during `update`, based on mouse position and panel visibility. The result is stored as `ui.active_layer`. Clicks dispatch to the owning layer's handler via early return. Draw code reads `active_layer` to decide whether to show hover states. The game world only processes input or draws hover effects when no UI layer claimed the mouse.
+`hub.lua` resolves which layer owns the mouse once per frame during `update`, based on mouse position and panel visibility. The result is stored as `hub.active_layer`. Clicks dispatch to the owning layer's handler via early return. Draw code reads `active_layer` to decide whether to show hover states. The game world only processes input or draws hover effects when no UI layer claimed the mouse.
 
 Priority chain (first match wins): management overlay (if open) → left panel (if open) → action bar → command bar → right panel → game world.
 
@@ -45,7 +45,7 @@ DRAW ORDER
 1. **World pass** — camera transform applied. Tiles, buildings, units, ground piles, placement ghosts, designation markers. Everything that exists in world-space.
 2. **UI pass** — no camera transform. Panels, buttons, notifications, tooltips. Everything in screen-space.
 
-The renderer handles the world pass. `ui.draw()` handles the UI pass.
+The renderer handles the world pass. `hub.draw()` handles the UI pass.
 
 INTERACTION MODES
 
@@ -75,7 +75,7 @@ HOTKEYS
 
 All non-debug hotkeys are remappable via the `Keybinds` table in `config/keybinds.lua`. The input handler checks `love.keyboard.isDown(Keybinds.action_name)` instead of checking key literals directly. See TABLES.md for default bindings.
 
-Debug keys (hardcoded, not remappable): F1 (spawn serf at cursor), Shift+F1 (spawn 5 serfs), F3 (toggle developer overlay).
+Debug keys (F1, Shift+F1, F3) are hardcoded and non-remappable. See DEV.md § Developer Overlay and § Debug Spawn.
 
 Building placement has no hotkeys — the player clicks the action bar button. Designation hotkeys expand as new designation types come online in later phases.
 
@@ -170,17 +170,17 @@ RESOURCE OVERVIEW
 
 A table showing `world.resource_counts` across all categories. All resource types from ResourceConfig are listed as rows regardless of current amounts. Categories are columns. A visual gap separates `storage_reserved` from the other categories since reserved is a subset of storage, not a separate pool.
 
-| | Sto | Pro | Hom | Car | Eqp | Gnd | | Rsv |
-|---|---|---|---|---|---|---|---|---|
-| wood | 42 | | | 8 | | | | 4 |
-| berries | 16 | | 12 | 4 | | 3 | | 0 |
-| fish | 8 | | 6 | | | | | 0 |
+| | Sto | Pro | Hom | Con | Car | Eqp | Gnd | | Rsv |
+|---|---|---|---|---|---|---|---|---|---|
+| wood | 42 | | | | 8 | | | | 4 |
+| berries | 16 | | 12 | | 4 | | 3 | | 0 |
+| fish | 8 | | 6 | | | | | | 0 |
 
-Column abbreviations: Sto = storage, Pro = processing, Hom = housing, Car = carrying, Eqp = equipped, Gnd = ground, Rsv = storage_reserved.
+Column abbreviations: Sto = storage, Pro = processing, Hom = housing, Con = construction, Car = carrying, Eqp = equipped, Gnd = ground, Rsv = storage_reserved.
 
 NOTIFICATION FEED
 
-See Notifications section below.
+Implementation deferred to Phase 2. See Notifications section below for the design spec.
 
 ## Left Panel
 
@@ -250,9 +250,11 @@ Per-type filter controls on storage building left panels. Each resource type sho
 
 ## Notifications
 
+*Implementation deferred to Phase 2. Design spec below.*
+
 Feed in the right panel, newest at top. Each entry is one line of text with the event type and relevant name.
 
-P1 NOTIFICATION TYPES
+NOTIFICATION TYPES
 
 | Event | Example text | Auto-pause |
 |---|---|---|
@@ -265,4 +267,4 @@ Clicking a notification centers the camera on the source entity or position. If 
 
 Entries persist until dismissed or until a maximum count (20) pushes old ones off the bottom.
 
-Auto-pause configuration per event type is a later refinement. No notification sounds for P1.
+Auto-pause configuration per event type is a later refinement. No notification sounds at the initial implementation.

@@ -1,5 +1,5 @@
 # Sovereign — CLAUDE.md
-*v35 · Technical reference for Claude Code and Claude.ai design sessions.*
+*v37 · Technical reference for Claude Code and Claude.ai design sessions.*
 
 > **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
 
@@ -12,7 +12,7 @@ Detailed specs live in separate files. Read the relevant file before implementin
 | **BEHAVIOR.md** | Tick order, hash offset, per-unit update loops (per-tick and per-hash), action types and handlers, `onActionComplete` priority chain (soft interrupt consumption, offloading dispatch, on-completion poll, activity handler dispatch), need interrupts (soft/hard, availability gating, priority ordering), sleep (time-of-day thresholds, wake check, sleep destination, collapse), home assignment, eating behavior, homeless eating, work day and recreation (work_ticks_remaining, is_done_working, daily reset, tavern visits, wandering), carrying (rules, single-type invariant, weight cap), work cycles (designation, gathering, extraction, processing, farming, construction — site clearing, unit displacement, blueprint transition, builder cycle), production order evaluation, work in progress, equipment want detection (fetch mechanics live in HAULING.md), drafting, unit death cleanup, building deletion cleanup, classes and specialties (promotion, children, activity filtering, skill growth). |
 | **HAULING.md** | Request and activity model, generic haul cycle, reservation placement and release timing, activity slot, cleanup, variant catalog (request-based public: filter pull, construction delivery, ground pile cleanup; private transport: self-fetch as head phase, self-deposit as tail phase, merchant delivery; private pickup/use: equipment fetch, eating trip; offloading as recovery path), request → activity conversion, partial-fill chain, worker polling (queue scan + on-completion poll), eligibility validation, carrying interaction. |
 | **ECONOMY.md** | Resource entities (stacks, items), containers (bin, tile inventory, stack inventory, item inventory, ground pile), reservation system (mechanism and lifecycle, inviolate-except-player-intervention rule), resources module API, resource counts system, frost and farming (thaw/frost system, per-tile crop state, farm controls, farm activity posting, harvest yield), ground piles (creation, request self-posting, ground drop search algorithm), storage filter system (filter modes, pull mechanics via requests, source resolution, cycle detection), merchant delivery system, firewood production and home heating. |
-| **WORLD.md** | Map (dimensions, terrain, forest coverage, forest depth), map generation (noise setup, full pipeline, tuning), pathfinding (A*, tile costs, A* building exemption, movement model, movement speed, collision, failure), building layout (tile types, tile maps, clearing, orientation, placement validation, construction phases, buildings without tile maps, pathfinding integration), plant system (growth stages, spread, cursor scan), visibility (deferred). |
+| **WORLD.md** | Map (dimensions, terrain, forest coverage, forest depth), map generation (noise setup, full pipeline, tuning), pathfinding (A*, tile costs, A* building exemption, movement model, movement speed, collision, failure), building layout (tile types, tile maps, clearing, orientation, placement validation, construction states, buildings without tile maps, pathfinding integration), plant system (growth stages, spread, cursor scan), visibility (deferred). |
 | **TABLES.md** | Game entity data structures (unit, memory, tile, activity, request, production order, work in progress, building, ground pile, world). All config tables (NeedsConfig, SleepConfig, RecreationConfig, MerchantConfig, HousingBinConfig, ActivityConfig, ActivityTypeConfig, SerfChildActivities, RecipeConfig, GrowthConfig, MoodThresholdConfig, MoodModifierConfig, InjuryConfig, IllnessConfig, MalnourishedConfig, ResourceConfig, PlantConfig, CropConfig, BuildingConfig, NameConfig, SettlementNameConfig, Keybinds). Production chains. |
 | **UI.md** | UI architecture (module structure, module lifecycle, input routing, draw order, interaction modes), camera, input handling, hotkeys and remappable keybinds, layout (right panel, left panel, bottom bar), selection mechanics, panel contents and variations, command bar, management overlays, notification display. |
 | **DEV.md** | Logging system, developer overlay (F3 hotkey, stats bar, tile inspector), TPS tracking, debug spawn (F1), config validation rules, logic tests. Loaded only when work touches dev tooling, the log system, validation, or tests. |
@@ -272,7 +272,6 @@ All constants in `config/constants.lua`. Loaded once via `require("config.consta
 ```lua
 -- Priorities
 Priority = { DISABLED = 0, LOW = 1, NORMAL = 2, HIGH = 3 }
-InterruptLevel = { NONE = 0, SOFT = 1, HARD = 2 }
 
 -- Classes are string identifiers, not integer enums (no natural ordering)
 -- Valid classes: "serf", "freeman", "clergy", "gentry"
@@ -362,6 +361,7 @@ RESOURCE_SCAN_RADIUS = 100  -- flood fill tile cap for nearest map resource sear
 
 -- Food
 FOOD_VARIETY_WINDOW = 3 * TICKS_PER_DAY   -- food types eaten within this window count for variety bonus
+EAT_TICKS           = 15 * TICKS_PER_MINUTE   -- duration of one item's eat action
 
 -- Work day and recreation
 WORK_DAY_RESET_HOUR      = 4     -- is_done_working resets, work_ticks_remaining refills

@@ -1,5 +1,5 @@
 # Sovereign — Design Document
-*v19*
+*v20*
 
 ## Project Overview
 
@@ -277,7 +277,7 @@ Three storage types with distinct roles. See Storage above for design rationale.
 
 See TABLES.md for BuildingConfig and bed assignment. See WORLD.md for building layout and construction states.
 
-In Phase 1, buildings are placed instantly — no construction time, no material cost. All obstructions (trees, bushes, ground piles, units) block placement — the player must clear the site first. Starting in Phase 2, proper construction replaces instant-build. Placing a building begins a construction process — the site is cleared of obstructions, materials are delivered, and a builder works until the structure is complete. See WORLD.md Construction States for lifecycle rules. See BEHAVIOR.md Construction Work Cycle for clearing and building behavior.
+In Phase 1, buildings are placed instantly — no construction time, no material cost. All obstructions block placement — the player must clear the site first. Starting in Phase 2, proper construction replaces instant-build. Placing a building begins a construction process — the site is cleared of obstructions, materials are delivered, and a builder works until the structure is complete. See WORLD.md Construction States for lifecycle rules and Placement Validation for the full obstruction list. See BEHAVIOR.md Construction Work Cycle for clearing and building behavior.
 
 The player can delete buildings. Deletion has real consequences — residents are displaced, stored resources spill onto the ground, and linked logistics are severed. Buildings under construction can also be deleted. See BEHAVIOR.md Building Deletion for the full cleanup sequence.
 
@@ -289,4 +289,4 @@ The player can delete buildings. Deletion has real consequences — residents ar
 
 **Marriage:** Permanent bond between two units. Can affect class standing. *Formation mechanics pending.*
 
-**Notifications:** The game notifies the player of important events (unit trapped, storage full, no matching building for specialty). Some can be configured to auto-pause or auto-slowdown. See UI.md for notification types, display, and auto-pause rules. *Additional notification types and event speed controls pending.*
+**Notifications:** The game notifies the player of important events and problems. Some can be configured to auto-pause or auto-slowdown. See UI.md for notification types, display, and auto-pause rules. *Additional notification types and event speed controls pending.*

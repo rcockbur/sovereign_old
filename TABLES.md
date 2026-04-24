@@ -1,5 +1,5 @@
 # Sovereign — TABLES.md
-*v27 · Reference data: game entity data structures, config tables, and production chains.*
+*v30 · Reference data: game entity data structures, config tables, and production chains.*
 
 ## Data Structures
 
@@ -10,7 +10,6 @@ unit = {
     id = 0, name = "", surname = "", gender = "male", class = "serf",
     is_dead = false,
     is_drafted = false,
-    draft_tile = nil,           -- flat index assigned by command system
     age = 0,                    -- life-years (increments once per season)
     birth_day = 0, birth_season = 0,
     death_age = 0,              -- predetermined at birth, bell curve around ~60
@@ -18,9 +17,6 @@ unit = {
 
     is_leader = false,
     specialty = nil,            -- "baker" | "priest" | etc., or nil. Career, not a building assignment.
-    needs_tier = "meager",      -- "meager" | "standard" | "luxurious"
-                                -- Set on creation, updated on promotion.
-                                -- meager: all serfs. standard: freemen, priests. luxurious: gentry, bishops.
 
     father_id = nil, mother_id = nil,
     child_ids = {}, spouse_id = nil,
@@ -219,7 +215,7 @@ activity = {
 }
 ```
 
-`type` keys into ActivityTypeConfig, or `"haul"` for hauling activities. `purpose` classifies the activity — see BEHAVIOR.md for how purpose interacts with the work day counter. `is_private` marks self-posted activities — see HAULING.md for the request/activity distinction and the variant catalog.
+`purpose` classifies the activity — see BEHAVIOR.md for how purpose interacts with the work day counter. `is_private` marks self-posted activities — see HAULING.md for the request/activity distinction and the variant catalog.
 
 In normal transport hauls, `source_reserved_amount` and `destination_reserved_amount` track equal values. They diverge in pickup/use variants (only source is reserved, destination_reserved_amount is nil), merchant delivery's first trip (source reserves the full carry load, destination reserves only `drop_amount`), and eat activity phases (both fields are nil during `to_consumption_site` and `consuming`; populated like a normal transport haul during `fetching_food_to_source` and `fetching_food_returning`).
 
@@ -333,6 +329,9 @@ building = {
         allow_planting = false, -- toggle. When on, empty tiles are eligible for planting work.
         auto_harvest = "off",   -- "off" | "per_tile" | "per_farm" — see ECONOMY.md Farm Controls
         planted_ticks = {},     -- sparse: planted_ticks[tileIndex] = tick when planted, nil = empty
+        harvest_flagged = {},   -- sparse: harvest_flagged[tileIndex] = true for tiles flagged by
+                                -- "Harvest Now". Eligible for harvest regardless of auto_harvest mode
+                                -- or maturity. Entries removed as tiles are harvested or destroyed.
     },
 
     -- Market (service building — merchant food delivery state)
@@ -471,31 +470,14 @@ A season is 7 days. `game_day` (1–7) is both the day-of-season and the weekday
 ## Config Tables
 
 ```lua
--- Three needs tiers: meager (serfs), standard (freemen, priests), luxurious (gentry, bishops).
--- Satiation is uniform across all tiers. Energy differs by tier for mood (higher tiers are
--- unhappier when tired). Recreation: mood meter, not a behavioral interrupt (see BEHAVIOR.md
--- Work Day and Recreation); only mood_threshold and mood_penalty live here per tier.
--- Lookup: NeedsConfig[unit.needs_tier]
---
--- Energy is uniform across all tiers for drain and hard_threshold. The soft threshold for
--- energy is time-of-day rather than per-tier — see SleepConfig and BEHAVIOR.md Sleep.
--- Satiation soft_threshold is flat at 75 (not time-varying). See BEHAVIOR.md Need Interrupts.
+-- Satiation soft_threshold is flat at 75 (not time-varying). Energy soft threshold is
+-- time-of-day rather than a flat field — see SleepConfig and BEHAVIOR.md Sleep.
+-- Recreation is a mood meter, not a behavioral interrupt (see BEHAVIOR.md Work Day and
+-- Recreation); only mood_threshold and mood_penalty live here.
 NeedsConfig = {
-    meager = {
-        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 75, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
-        energy     = { drain = 4 * PER_HOUR,                      hard_threshold = 10, mood_threshold = 30, mood_penalty = -10 },
-        recreation = { mood_threshold = 30, mood_penalty = -10 },
-    },
-    standard = {
-        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 75, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
-        energy     = { drain = 4 * PER_HOUR,                      hard_threshold = 10, mood_threshold = 50, mood_penalty = -15 },
-        recreation = { mood_threshold = 50, mood_penalty = -15 },
-    },
-    luxurious = {
-        satiation  = { drain = 2 * PER_HOUR, soft_threshold = 75, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
-        energy     = { drain = 4 * PER_HOUR,                      hard_threshold = 10, mood_threshold = 60, mood_penalty = -20 },
-        recreation = { mood_threshold = 60, mood_penalty = -20 },
-    },
+    satiation  = { drain = 2 * PER_HOUR, soft_threshold = 75, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
+    energy     = { drain = 4 * PER_HOUR,                      hard_threshold = 10, mood_threshold = 30, mood_penalty = -10 },
+    recreation = { mood_threshold = 30, mood_penalty = -10 },
 }
 
 -- Sleep mechanics. Recovery is the per-tick energy gain while in the sleep action.
@@ -514,16 +496,13 @@ SleepConfig = {
 }
 
 -- Recreation: mood meter, not a behavioral interrupt. See BEHAVIOR.md Work Day and Recreation.
--- Mood thresholds live in NeedsConfig per tier.
+-- Mood thresholds live in NeedsConfig.recreation.
 RecreationConfig = {
     work_drain      = 4.55 * PER_HOUR,    -- drains while awake and not recreating
     recovery_rate   = 10 * PER_HOUR,       -- base rate; subject to diminishing returns
     -- Diminishing returns formula TBD during tuning. Effective recovery =
     -- recovery_rate * diminishing_factor(current_recreation).
 }
-
--- Children use their class's needs tier (no separate child profile).
--- Serf children use meager, freeman children use standard, gentry children use luxurious.
 
 MerchantConfig = {
     idle_ticks_base = 2 * TICKS_PER_HOUR,      -- reduced by trading skill
@@ -636,7 +615,7 @@ MoodModifierConfig = {
     has_clothing          =   5,
     no_clothing           = -15,
     low_health            = -10,        -- applied when health < 50
-    -- Recreation mood penalty uses NeedsConfig[tier].recreation.mood_threshold and mood_penalty.
+    -- Recreation mood penalty uses NeedsConfig.recreation.mood_threshold and mood_penalty.
     -- Applied when recreation < mood_threshold. No bonus for high recreation.
 
     -- Stored modifiers (event-driven, with ticks_remaining)
@@ -867,7 +846,7 @@ BuildingConfig = {
         build_cost = { wood = 20 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
-        activity_type = "woodcutter",
+        activity_types = { "woodcutter" },
         tile_map = {
             "X", "X",
             "X", "X",
@@ -880,7 +859,7 @@ BuildingConfig = {
         build_cost = { wood = 15 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
-        activity_type = "gatherer",
+        activity_types = { "gatherer" },
         tile_map = {
             "X", "X",
             "X", "X",
@@ -893,7 +872,7 @@ BuildingConfig = {
         build_cost = { wood = 15 },
         build_ticks = 4 * TICKS_PER_HOUR,
         max_workers = 4,
-        activity_type = "herbalist",
+        activity_types = { "herbalist" },
         tile_map = {
             "X", "X",
             "X", "X",
@@ -909,7 +888,7 @@ BuildingConfig = {
         build_ticks = 6 * TICKS_PER_HOUR,
         placement = "water",
         max_workers = 3,
-        activity_type = "fisher",
+        activity_types = { "fisher" },
         tile_map = {
             "I", "I", "I",
             "I", "I", "I",
@@ -927,7 +906,7 @@ BuildingConfig = {
         build_ticks = 10 * TICKS_PER_HOUR,
         placement = "rock",
         max_workers = 4,
-        activity_type = "iron_miner",
+        activity_types = { "iron_miner" },
         tile_map = {},   -- TBD
         layout = {},     -- TBD
     },
@@ -938,7 +917,7 @@ BuildingConfig = {
         build_ticks = 10 * TICKS_PER_HOUR,
         placement = "rock",
         max_workers = 4,
-        activity_type = "stonecutter",
+        activity_types = { "stonecutter" },
         tile_map = {},   -- TBD
         layout = {},     -- TBD
     },
@@ -950,7 +929,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        activity_type = "miller",
+        activity_types = { "miller" },
         recipes = { "flour" },
         default_production_orders = {
             { recipe = "flour", is_standing = true, amount = -1 },
@@ -967,7 +946,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        activity_type = "baker",
+        activity_types = { "baker" },
         recipes = { "bread" },
         default_production_orders = {
             { recipe = "bread", is_standing = true, amount = -1 },
@@ -984,7 +963,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        activity_type = "brewer",
+        activity_types = { "brewer" },
         recipes = { "beer" },
         default_production_orders = {
             { recipe = "beer", is_standing = true, amount = -1 },
@@ -1001,7 +980,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        activity_type = "tailor",
+        activity_types = { "tailor" },
         recipes = { "plain_clothing" },
         default_production_orders = {
             { recipe = "plain_clothing", is_standing = true, amount = -1 },
@@ -1018,7 +997,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 40 },
         build_ticks = 12 * TICKS_PER_HOUR,
         max_workers = 1,
-        activity_type = "smith",
+        activity_types = { "smith" },
         recipes = { "iron_tools" },       -- Phase 3 adds "steel_tools" and a steel input bin
         default_production_orders = {
             { recipe = "iron_tools", is_standing = true, amount = -1 },
@@ -1035,7 +1014,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 40 },
         build_ticks = 12 * TICKS_PER_HOUR,
         max_workers = 1,
-        activity_type = "smelter",
+        activity_types = { "smelter" },
         recipes = { "steel" },
         default_production_orders = {
             { recipe = "steel", is_standing = true, amount = -1 },
@@ -1055,7 +1034,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        activity_type = "merchant",
+        activity_types = { "merchant" },
         tile_map = {},   -- TBD
         layout = {},     -- TBD
         -- Runtime: market.last_delivered populated from MerchantConfig food type keys at construction
@@ -1066,7 +1045,7 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        activity_type = "barkeep",
+        activity_types = { "barkeep" },
         tile_map = {},   -- TBD
         layout = {},     -- TBD: barkeep station + patron seats
         -- input/consumption mechanics pending (Phase 4)
@@ -1077,14 +1056,14 @@ BuildingConfig = {
         build_cost = { wood = 40, stone = 20 },
         build_ticks = 8 * TICKS_PER_HOUR,
         max_workers = 1,
-        activity_type = "physician",
+        activity_types = { "physician" },
         tile_map = {},   -- TBD
         layout = {},     -- TBD
     },
 }
 ```
 
-**Note on bloomery/smelter:** The building is `bloomery`, the activity_type is `smelter`, and the skill is `smelting`. Smelting is a distinct skill from smithing.
+**Note on bloomery/smelter:** The building is `bloomery`, its sole activity type is `smelter`, and the skill is `smelting`. Smelting is a distinct skill from smithing.
 
 ```lua
 NameConfig = {

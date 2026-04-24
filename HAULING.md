@@ -1,5 +1,5 @@
 # Sovereign — HAULING.md
-*v7 · Resource movement: requests, activities, reservations, variant catalog.*
+*v10 · Resource movement: requests, activities, reservations, variant catalog.*
 
 ## Overview
 
@@ -174,7 +174,7 @@ Equipment wants fire only when a slot is nil — never for upgrades to occupied 
 Phase strings:
 
 - `"to_consumption_site"` — traveling to the consumption location (home for eat-at-home when home has food, or the resolved source stockpile for homeless). No reservations. Name avoids collision with `"fetching_food_to_source"` below — "source" means different things in the two phases (consumption site vs haul source).
-- `"fetching_food_to_source"` — eat-at-home only: home bins are empty, traveling to a stockpile to fetch food. Standard private transport: source-side `reserved_out` and destination-side `reserved_in` placed at entry.
+- `"fetching_food_to_source"` — eat-at-home only: home bins are empty, traveling to a stockpile to fetch food. Standard private transport: source-side `reserved_out` and destination-side `reserved_in` placed at entry. Source and food type resolved per the fetch-leg selection rule in BEHAVIOR.md Eating Behavior (nearest storage with food, then most-available type at that source, ties by HousingBinConfig order).
 - `"fetching_food_returning"` — eat-at-home only: fetched food in carry, traveling back to home to deposit. Destination reservation released on deposit per the standard rule.
 - `"consuming"` — at the destination, running the consumption loop. No reservations.
 
@@ -186,19 +186,11 @@ Post-time path selection (atomic with the post):
 
 Fetch amount (at `fetching_food_to_source` entry): `min(carryableAmount(food_type), getAvailableStock(source, food_type))`. Home bins are uncapped (see ECONOMY.md Containers), so the destination term drops out — the fetch is bounded only by the unit's carry and the source's available stock.
 
-Consumption loop (per iteration at the current container):
+Consumption phase (`"consuming"`). The per-item consumption cycle runs here — see BEHAVIOR.md § Eating Work Cycle for the loop (stock check, food selection, withdraw, eat action, nutrition update, satiation check). This phase owns the trip-level fallbacks for when the loop exits without the unit being full:
 
-1. Call `getAvailableStock` for each food type at the container. If any type has stock > 0:
-   - Select the least-recently-eaten type available (scans `unit.last_ate`).
-   - Withdraw 1 item, consume it (update satiation and `unit.last_ate[type]`).
-   - If eating another item of any available type would exceed 100 satiation → complete the activity.
-   - Otherwise continue the loop.
-2. If no type has stock > 0:
-   - If unit is full → complete the activity.
-   - If unit is not full AND a reachable food source exists:
-     - Eat-at-home: transition to `"fetching_food_to_source"` with fresh reservations, resolve nearest source, travel.
-     - Homeless: resolve next nearest food source, transition to `"to_consumption_site"`, travel.
-   - If unit is not full AND no reachable source exists → complete the activity.
+- Eat-at-home: transition to `"fetching_food_to_source"` with fresh reservations, resolve nearest source, travel.
+- Homeless: resolve next nearest food source, transition to `"to_consumption_site"`, travel.
+- No reachable source: activity completes.
 
 The activity's `source_id` and `destination_id` are rewritten on phase transitions to reflect the current sub-trip. Reservation fields (`source_reserved_amount`, `destination_reserved_amount`) are populated during `"fetching_food_to_source"` / `"fetching_food_returning"` and cleared before entering `"consuming"` or `"to_consumption_site"`. See BEHAVIOR.md Eating Behavior for `last_ate` tracking, food variety mood, and homeless source priority.
 
@@ -275,7 +267,7 @@ Predicates by type:
 - **Gathering activity (building-based)** — at least one valid unclaimed target tile reachable from the building.
 - **Designation activity** — target tile still has the resource.
 - **Farmer planting activity** — `farming.allow_planting == true` AND `world.time.is_frost == false` AND at least one empty tile exists on the farm.
-- **Farmer harvesting activity** — at least one planted tile is eligible for harvest per the farm's `auto_harvest` mode (`per_tile`: tile at maturity 1.0; `per_farm`: all planted tiles at maturity 1.0; `off`: never auto-eligible) OR has been flagged by "Harvest Now".
+- **Farmer harvesting activity** — at least one planted tile is eligible for harvest per the farm's `auto_harvest` mode (`per_tile`: tile at maturity 1.0; `per_farm`: all planted tiles at maturity 1.0; `off`: never auto-eligible) OR has a matching `farming.harvest_flagged[tile_idx]` entry.
 - **Trivially-always-valid types** (extraction, service jobs at staffed buildings) — no flag set; worker scan treats unflagged entries as eligible.
 
 The eligibility flag is `nil` (or absent) for trivially-eligible types to avoid initialization overhead. Workers filter by `is_eligible == false` (skip), with everything else passing through.

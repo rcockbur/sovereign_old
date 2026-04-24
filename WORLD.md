@@ -1,5 +1,5 @@
 # Sovereign — WORLD.md
-*v14 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
+*v16 · Physical map: terrain, generation, pathfinding, building layout, plant system.*
 
 ## Map
 
@@ -292,14 +292,14 @@ Each building has a `layout` table defining positions within the footprint:
 ```lua
 bakery = {
     layout = {
-        workstation = { { x = 1, y = 1 } },
+        workstation = { { x = 0, y = 0 } },
     },
 }
 cottage = {
     layout = {
         beds = {
-            { x = 1, y = 1 }, { x = 3, y = 1 },
-            { x = 1, y = 2 }, { x = 3, y = 2 },
+            { x = 0, y = 0 }, { x = 2, y = 0 },
+            { x = 0, y = 1 }, { x = 2, y = 1 },
         },
     },
 }
@@ -379,7 +379,7 @@ Plants are tile data, not entities. Three types: tree, herb_bush, berry_bush. Ea
 
 ```lua
 tile.plant_type   = nil       -- nil | "tree" | "herb_bush" | "berry_bush"
-tile.plant_growth = 0         -- 0=empty, 1=seedling, 2=young, 3=mature
+tile.plant_growth = 0
 ```
 
 When `plant_growth == 0`, `plant_type` must be `nil`. When `plant_growth > 0`, `plant_type` identifies what's growing.

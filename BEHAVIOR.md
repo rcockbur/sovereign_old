@@ -1,5 +1,5 @@
 # Sovereign — BEHAVIOR.md
-*v26 · Unit behavior: tick order, update loops, action system, classes and specialties.*
+*v30 · Unit behavior: tick order, update loops, action system, classes and specialties.*
 
 ## Simulation
 
@@ -30,6 +30,9 @@ Direct call chain — no event bus, no registration. Adding a new system means a
 Calendar-driven logic uses modulo checks in `simulation.onTick`, not inside individual systems:
 
 ```lua
+if world.time.tick % TICKS_PER_DAY == WORK_DAY_RESET_HOUR * TICKS_PER_HOUR then
+    units.resetWorkDay()    -- walk living units, reset work_ticks_remaining / is_done_working
+end
 if world.time.tick % TICKS_PER_SEASON == 0 then
     units.processSeasonalAging()
 end
@@ -70,7 +73,7 @@ Unit updates are split into two loops: a **per-tick** loop that runs every tick 
 
 **Per-tick loop (every tick, every living unit):**
 
-1. **Advance current action** — `moveStep()` for travel, `workStep()` for work (increments progress, grows skill for specialty workers), `sleepStep()` for the sleep action (recovers energy, checks wake threshold — see Sleep section). Idle does nothing per-tick.
+1. **Advance current action** — `moveStep()` for travel, `workStep()` for work (increments progress, grows skill for specialty workers), `eatStep()` for the eat action (increments progress), `sleepStep()` for the sleep action (recovers energy, checks wake threshold — see Sleep section). Idle does nothing per-tick.
 2. **Decrement work day counter** — if `activity_id` is set and `registry[activity_id].purpose == "work"`, decrement `work_ticks_remaining` by 1 (clamped at 0). Interrupt and recreation activities do not decrement it.
 3. **On action complete** → `onActionComplete()` fires inline. See the `onActionComplete` pseudocode for the full priority chain: soft interrupt consumption, offloading, idle, activity handler dispatch.
 
@@ -88,10 +91,10 @@ end
 **Per-hash loop (once per HASH_INTERVAL ticks per unit):**
 
 1. **Drain needs** (satiation and energy drain toward 0 — multiplied by `HASH_INTERVAL` per application). Energy only drains while the unit is awake — sleepStep handles recovery during the sleep action. Recreation drains while awake and not recreating (see Work Day and Recreation).
-2. **Check hard need interrupts** — skipped if `is_drafted`. Satiation (availability-gated) and energy checked against hard thresholds. See Need Interrupts for threshold values, availability gating, priority ordering, and cleanup behavior. See Sleep for energy-specific destination logic.
-3. **Check soft need interrupts** — skipped if `is_drafted`. Energy (time-varying threshold) and satiation (flat threshold, availability-gated) checked. If below threshold: if the unit is already at a clean break (idle and not carrying), execute the soft interrupt directly — recheck threshold, post private need activity if still below, same priority and recheck logic as the `onActionComplete` path. No flag set. Otherwise set `soft_interrupt_pending` for deferred consumption. See Need Interrupts for the full consumption flow.
+2. **Check hard need interrupts** — skipped if `is_drafted`. Satiation (availability-gated) and energy checked against hard thresholds. Each need's check is skipped when the current activity is already addressing that need (satiation when activity is `"eat"`, energy when activity is `"sleep"`) — see Need Interrupts In-Progress Skip Rule. See Need Interrupts for threshold values, availability gating, priority ordering, and cleanup behavior. See Sleep for energy-specific destination logic.
+3. **Check soft need interrupts** — skipped if `is_drafted`. Energy (time-varying threshold) and satiation (flat threshold, availability-gated) checked. Same in-progress skip rule as step 2. If below threshold: if the unit is already at a clean break (idle and not carrying), execute the soft interrupt directly — recheck threshold, post private need activity if still below, same priority and recheck logic as the `onActionComplete` path. No flag set. Otherwise set `soft_interrupt_pending` for deferred consumption. See Need Interrupts for the full consumption flow.
 4. **Check equipment wants** — skipped if `is_drafted`. If a wanted equipment type is missing and available in storage: if the unit is already at a clean break, execute the equipment fetch directly (same logic as the `onActionComplete` path). Otherwise set `soft_interrupt_pending` for deferred consumption. See Equipment Wants for want rules, availability gating, and fetch flow.
-5. **Check work day counter** — skipped if `is_drafted`. If `work_ticks_remaining` has reached 0 and `is_done_working` is not yet true, set `is_done_working = true`. If `game_hour` has crossed `WORK_DAY_RESET_HOUR` since last check, reset `work_ticks_remaining` to the unit's configured work hours (in ticks) and set `is_done_working` to false. See Work Day and Recreation.
+5. **Check work day counter** — skipped if `is_drafted`. If `work_ticks_remaining` has reached 0 and `is_done_working` is not yet true, set `is_done_working = true`. The daily reset of `work_ticks_remaining` and `is_done_working` fires from the calendar-driven block in `simulation.onTick` (see Tick Order), not from here. See Work Day and Recreation.
 6. **Poll activity queue or select recreation** — skipped if `is_drafted`. If idle:
    - `is_done_working == false`: scan for best activity (skipped if `class == "gentry"`). This is the periodic retry for units that were idle at `onActionComplete` — new activities may have been posted since the last hash tick.
    - `is_done_working == true`: select best available recreation activity, post and claim a private recreation activity. See Work Day and Recreation for selection logic.
@@ -163,10 +166,11 @@ ACTION TYPES
 |---|---|---|
 | travel | advance along path | arrived at destination |
 | work | increment progress, grow skill (specialty workers only) | progress reaches work_ticks |
+| eat | increment progress | progress reaches EAT_TICKS |
 | sleep | recover energy per tick (see Sleep section) | energy ≥ current wake threshold |
 | idle | do nothing | never (cleared by activity poll or interrupt) |
 
-Resource transfers (picking up from buildings, depositing to buildings) are instant inline operations performed by the handler between actions — not actions themselves. Work completion auto-grants resources to `unit.carrying` for gathering activities (via `resources.produceIntoCarrying`).
+Resource transfers (picking up from buildings, depositing to buildings) are instant inline operations performed by the handler between actions — not actions themselves. Work completion auto-grants resources to `unit.carrying` for gathering activities (via `resources.produceIntoCarrying`). Eat completion destroys one item from `unit.carrying` and applies nutrition — see Eating Work Cycle.
 
 Recreation activities (tavern visit, wandering) are private activities with handlers, following the same pattern as eat and sleep activities. They use travel and idle actions — no distinct recreation action type. See Work Day and Recreation for the behavioral flow.
 
@@ -323,7 +327,20 @@ Ground piles dropped on farm tiles during harvest self-post cleanup requests. Ha
 
 EATING WORK CYCLE
 
-The eat activity is private — see Hauling for the trip mechanics (reservation, travel, source resolution) and Eating Behavior for the consumption loop.
+The eat activity is private. See HAULING.md Eating Trip for the trip state machine (phases, post-time path selection, reservation timing) and Eating Behavior for food-selection rules. This section owns the per-item consumption cycle that runs inside the `"consuming"` phase.
+
+On arrival at the consumption site (home bins with food, or a stockpile for a homeless unit), the eat handler enters the per-item loop:
+
+1. Check `getAvailableStock` at the current container. No stock → fall back per HAULING.md Eating Trip (eat-at-home transitions to `"fetching_food_to_source"`; homeless switches source; no reachable source → activity completes).
+2. Select the food type (least-recently-eaten available — see Eating Behavior Food Selection).
+3. Withdraw 1 item from the container into `unit.carrying` via `resources.moveToCarrying`.
+4. Set `current_action = { type = "eat", progress = 0, target = EAT_TICKS }`. Per-tick `eatStep` increments progress. On completion, `onActionComplete` fires.
+5. In the eat handler on action complete: destroy the carried item via `resources.consumeFromCarrying`; `unit.needs.satiation += ResourceConfig[type].nutrition` (capped at 100); set `unit.last_ate[type] = current_tick`.
+6. Would another item of any available type exceed 100 satiation? → complete activity. Otherwise → go to 1.
+
+Satiation is applied at end-of-action, not at withdraw. A unit whose eat action is interrupted mid-chew (hard energy interrupt, draft, death, building deletion) drops the carried item via the surrounding cleanup path's ground-drop and gains no nutrition from that item. Items consumed earlier in the same meal stay applied.
+
+Food is held in `unit.carrying` for the duration of each eat action. The carry briefly returns to 0 between items inside the synchronous handler, then refills on the next withdraw — no externally-observable gap. `#carrying > 0` is true throughout each action, so soft-interrupt flags (energy soft, equipment want) set during a meal wait until the activity completes per the standard clean-break rule.
 
 SLEEP WORK CYCLE
 
@@ -384,6 +401,8 @@ Soft and hard need interrupts for satiation are gated on availability — the in
 
 **Interrupt priority:** Hard interrupts check satiation before energy — a starving unit eats before sleeping, because starvation kills. Soft interrupts check energy before satiation — sleep drives the daily rhythm, and the overnight satiation drain naturally produces breakfast on wake. Equipment wants are checked after all needs pass. See per-hash loop steps 2–4 for threshold values, availability checks, and cleanup behavior.
 
+**In-progress skip rule.** Per-hash steps 2 and 3 skip the interrupt check for a need when the current activity is already addressing that need — satiation interrupts skip when `registry[activity_id].type == "eat"`, energy interrupts skip when `registry[activity_id].type == "sleep"`. Without this, a unit mid-meal below the hard satiation threshold (or mid-sleep below the hard energy threshold) would re-fire the interrupt every per-hash tick until the need climbed past threshold — releasing the in-progress activity, dropping any carried item, and posting a new activity in the same frame. Cross-need interrupts are unaffected: a sleeping unit still hard-interrupts to eat when satiation collapses, and a unit mid-meal still collapses when energy hits 0.
+
 **Failure mode:** When the settlement has zero available food, no satiation interrupts fire. Units work until malnourishment drains their health to 0. The player's signal is health warnings and death notifications — a sharp, visible collapse.
 
 **Soft interrupt consumption flow:** `soft_interrupt_pending` is consumed at the first clean break — action complete AND not carrying. Two execution paths reach the same logic:
@@ -420,7 +439,7 @@ Both thresholds are continuous everywhere — every band boundary is a flat-to-l
 
 **Wake check (per tick during sleep action):** `sleepStep()` adds `SleepConfig.recovery_rate` to `unit.needs.energy` (capped at 100), then checks if `energy ≥ time.getEnergyThresholds().wake`. If so, the sleep action completes and `onActionComplete` fires inline. The sleep activity handler releases the activity; the unit goes idle and picks up work on the next per-hash activity poll. The wake threshold is evaluated live each tick, so a unit sleeping through evening sees the threshold climb and sleeps longer to catch the rising bar. A unit sleeping through morning sees the threshold drop and wakes earlier than the night ceiling would have allowed.
 
-Energy does not drain during the sleep action — drain only applies while the unit is awake (per-hash loop step 1 skips drain when current action is sleep).
+Energy does not drain during the sleep action — drain only applies while the unit is awake (per-hash loop step 1 skips drain when current action is sleep). Hard and soft energy interrupt checks are also skipped while the current activity is `"sleep"` — see Need Interrupts In-Progress Skip Rule.
 
 HOME ASSIGNMENT
 
@@ -430,21 +449,18 @@ When `home_id` is set, assign the first available bed (where `unit_id == nil`). 
 
 EATING BEHAVIOR
 
-When a unit eats at home, it consumes food from the home building's `housing.bins`. Each food type has a `nutrition` value in ResourceConfig representing how much satiation it restores.
+A housed unit eats from its home building's `housing.bins` when food is available; when bins are empty the unit fetches a carry load back from the nearest storage with food before consuming. A homeless unit eats directly from the nearest available food source — see Homeless Eating below. See HAULING.md Eating Trip for the full state machine, post-time path selection, reservation timing, and consumption loop.
 
-The eat activity has its own four-phase state machine (`to_consumption_site`, `fetching_food_to_source`, `fetching_food_returning`, `consuming`). Transport legs (`fetching_food_to_source`, `fetching_food_returning`) use standard source and destination reservations. Consumption legs (`to_consumption_site`, `consuming`) place no reservations — per-iteration `getAvailableStock` checks during the consumption loop respect every other system's reservations without needing to place their own. See HAULING.md Eating Trip for the full state machine, post-time path selection, reservation timing, and consumption loop.
+See ECONOMY.md for the definition of "food" (resources with `ResourceConfig[type].nutrition`) and the start-time validation that keeps the food set, HousingBinConfig, and MerchantConfig aligned.
 
-**Post-time path selection:** When the eat activity is posted (from a hard or soft satiation interrupt, or from the per-hash idle fast path), the posting site checks the home's bins to pick the right starting phase:
+**Food selection.** Two selection rules apply at two points in the eat activity:
 
-- `home_id` set AND home bins contain food → start in `"to_consumption_site"` heading home.
-- `home_id` set AND home bins empty → start in `"fetching_food_to_source"`, resolving the nearest food source. Skip the futile trip home.
-- `home_id` nil → homeless path; see Homeless Eating below.
+- *Fetch leg* (`fetching_food_to_source` entry, housed unit bringing food home): resolve the nearest storage with available stock of any food type. At that source, select the food type with the most available stock. The unit brings home whatever single type the source has most of, which makes the trip efficient and leaves variety work to the consumption loop.
+- *Consumption iteration* (`consuming`, for home eating and homeless eating): select the food type the unit has eaten least recently — oldest `last_ate` value, with `nil` treated as oldest. This rotates through available types and supports the food variety mood bonus.
 
-**Food selection (per consumption iteration):** The unit prefers the food type it has eaten least recently (oldest `last_ate` value, or nil). This naturally rotates through available types, supporting the food variety mood bonus. The unit scans bins that contain food with available stock and selects based on `last_ate`.
+Both rules break ties by HousingBinConfig declaration order. This gives deterministic selection whenever two types are equally eligible — notably on a unit's first meal (all `last_ate` values are `nil`) and whenever two stockpile stock counts tie on the fetch leg.
 
 **Food variety mood:** During mood recalculation, count how many distinct food types have `last_ate` within `FOOD_VARIETY_WINDOW` (3 days). Each type beyond the first grants `food_variety_bonus` (+5). No penalty for lack of variety, only a bonus for achieving it.
-
-**Races between housemates (consumption only):** Two housemates arriving home simultaneously both see food, both enter `"consuming"`. Whichever iterates first withdraws what's there; the loser's next iteration finds no stock and the consuming loop falls back to `"fetching_food_to_source"` (which then places standard reservations for the fetch). The wasted trip (unit walked home, found empty bins, now walks to stockpile) is the cost of the consumption-side carve-out. Acceptable because housemate races are rare in practice and the fallback handles them without special-casing. Fetch legs don't race — reservations serialize them.
 
 HOMELESS EATING
 
@@ -464,13 +480,13 @@ WORK DAY AND RECREATION
 
 Units have a configurable work day length (10, 11, or 12 hours), set per-unit by the player in the work priority menu. The work day is tracked by `work_ticks_remaining`, a counter that decrements once per tick when the unit's activity has `purpose == "work"` (see per-tick loop step 2). Interrupt and recreation activities do not decrement it.
 
-**Daily reset:** At `WORK_DAY_RESET_HOUR` (4am), `work_ticks_remaining` is set to the unit's configured work hours (converted to ticks) and `is_done_working` is set to false. The reset fires regardless of unit state — sleeping, awake, or drafted. This synchronizes all units to the same daily clock.
+**Daily reset:** At `WORK_DAY_RESET_HOUR` (4am), `units.resetWorkDay()` walks all living units and sets `work_ticks_remaining` to the unit's configured work hours (converted to ticks) and `is_done_working` to false. The call fires from the calendar-driven block in `simulation.onTick` — see Tick Order. Driving the reset from the orchestrator (rather than per-hash step 5) synchronizes all units to the same daily clock regardless of hash offset, sleep state, or draft state.
 
 **Transition to recreation:** When `work_ticks_remaining` reaches 0, `is_done_working` becomes true. The unit finishes its current task cleanly (including deposit). On the next per-hash step 6 where the unit is idle, recreation selection runs instead of activity polling.
 
 **Recreation as private activities:** Each recreation activity is a separate private activity type with its own handler, following the same pattern as eat and sleep activities. When a recreation handler completes, it releases the activity and the unit goes idle. On the next per-hash step 6, recreation selection evaluates again and may post a different recreation activity. The HASH_INTERVAL gap between recreation activities is natural — a unit standing briefly between "done wandering" and "heading to tavern" looks like a person deciding what to do next.
 
-**Recreation selection (per-hash step 6, `is_done_working == true`):** Evaluate which recreation activity to pursue. Currently two options: visit the tavern (if exists, open for the evening, and not already visited this evening) or wander near home. Selection runs fresh each time, so a unit that finishes wandering might discover the tavern just opened and head there next. The selection logic lives in one place — per-hash step 6 — not inside individual handlers.
+**Recreation selection (per-hash step 6, `is_done_working == true`):** Evaluate which recreation activity to pursue. Currently two options: visit the tavern (if exists; open hours and per-unit visit tracking pending design alongside other tavern mechanics) or wander near home. Selection runs fresh each time, so a unit that finishes wandering might discover the tavern just opened and head there next. The selection logic lives in one place — per-hash step 6 — not inside individual handlers.
 
 **Wandering work cycle:**
 
@@ -483,7 +499,7 @@ The HASH_INTERVAL gap between arrival and the next per-hash step 6 provides a na
 **Tavern visit work cycle:**
 
 1. Travel to tavern.
-2. On arrival → eat from tavern food bins if hungry (satisfying satiation, same consumption loop as home eating). If beer is available, consume a beer for the `beer_consumed` mood bonus.
+2. On arrival → eat from tavern food bins if hungry. Tavern consumption mechanics are deferred. If beer is available, consume a beer for the `beer_consumed` mood bonus.
 3. Recover recreation at the tavern recovery rate. Release activity. Unit goes idle.
 
 The tavern combines the evening meal and recreation into one efficient trip.
@@ -543,8 +559,6 @@ CHILDREN
 - Freeman children (age 6+): attend school (grows intelligence).
 - Gentry children (age 6+): attend school (grows intelligence).
 - Clergy children: do not exist (clergy are celibate).
-
-Children use their class's needs tier. Serf children use meager, freeman children use standard, gentry children use luxurious.
 
 SPECIALTIES
 

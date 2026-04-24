@@ -1,5 +1,5 @@
 # Sovereign — ECONOMY.md
-*v22 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
+*v25 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
 
 ## Resource System
 
@@ -29,6 +29,12 @@ item = {
 ```
 
 Items are non-fungible — each one is unique. Durability decreases over time: tools drain per tick during the `work` action, clothing drains per tick while awake. When durability reaches 0, the item is destroyed (removed from `world.items` and registry). The unit continues at base effectiveness until a replacement is equipped. Exact drain rates are pending tuning per phase.
+
+FOOD
+
+A resource is food if `ResourceConfig[type].nutrition` is non-nil. The nutrition value is the amount of satiation a single item restores when consumed. This predicate is the canonical answer to "which resources count as food" and is used wherever the eating, merchant, or housing systems need to iterate food types.
+
+Two downstream configs enumerate food types independently and must match the canonical set exactly: `HousingBinConfig` declares the food bins each home is built with, and `MerchantConfig.bin_threshold` keys declare the types the merchant delivers. Both are validated at load time — a mismatch in either direction (a food resource missing from either config, or a non-food type listed in either config) fails config validation and prevents the game from starting. This keeps the three declarations in lockstep as new food types are added in later phases.
 
 CONTAINERS
 
@@ -158,7 +164,8 @@ Trivial field access is done directly by callers: `unit.equipped[slot]`, `stack.
 
 - `resources.produceInto(container, type, amount)` — create entities and deposit into the container in one operation. Used by debug spawn commands; the only entry point that brings resources into the world without a source. Asserts container accepts type and has capacity for amount.
 - `resources.produceIntoCarrying(unit, type, amount)` — create entities directly into `unit.carrying`. Used by workers producing resources (harvest, extraction, processing output). If carrying is empty, creates a new stack and appends. If carrying already holds the same type, merges (stacks) or appends (items). Asserts carrying is empty or holds the same type; asserts carry weight would not exceed `CARRY_WEIGHT_MAX`. Updates `resource_counts.carrying` and recalculates `unit.move_speed`.
-- `resources.consumeFrom(container, type, amount)` — withdraw from the container and destroy the entities in one operation. Used by eating (housing bin, or a storage container directly for homeless eating), construction consumption (construction bin), and processing input consumption (input bin). Asserts container holds at least `amount` of type.
+- `resources.consumeFrom(container, type, amount)` — withdraw from the container and destroy the entities in one operation. Used by construction consumption (construction bin) and processing input consumption (input bin). Asserts container holds at least `amount` of type.
+- `resources.consumeFromCarrying(unit, type, amount)` — withdraw from `unit.carrying` and destroy the entities in one operation. Used by the eat activity at end-of-action to destroy the just-chewed item. Asserts carrying holds at least `amount` of type. Updates `resource_counts.carrying` and recalculates `unit.move_speed`.
 - `resources.moveToCarrying(unit, source, type, amount)` — withdraw from source and place into `unit.carrying` in one operation. Used by haulers at pickup. Same carrying constraints and side effects as `produceIntoCarrying`. Asserts source holds at least `amount` of type.
 - `resources.moveFromCarrying(unit, destination, type, amount)` — withdraw from `unit.carrying` and deposit into destination in one operation. Used by haulers at delivery and by workers self-depositing. Asserts carrying holds at least `amount` of type; asserts destination accepts type and has capacity for amount; asserts `destination.container_type ~= "ground_pile"` (ground piles are reachable only via `dropToGround` / `dropUnitContents`). Updates `resource_counts.carrying` and recalculates `unit.move_speed`.
 - `resources.transfer(source, destination, type, amount)` — withdraw from source and deposit into destination in one operation. Used for container-to-container moves with no unit involved. Asserts source holds at least `amount` of type; asserts destination accepts type and has capacity for amount; asserts `destination.container_type ~= "ground_pile"`.
@@ -231,16 +238,16 @@ At the start of each year, the game rolls two values: `thaw_day` (a spring day n
 
 **Frost warning:** 1–2 days before `frost_day` (configurable via `FROST_WARNING_DAYS`), notification: "Frost is approaching." This is the player's signal to trigger "Harvest Now" on any farms with immature crops.
 
-**Frost arrival:** When the calendar reaches autumn day `frost_day`, `is_frost` is set to true. Notification: "Frost has arrived." Crops stop growing (maturity no longer advances). Unharvested crops begin decaying — maturity decreases at `FROST_DECAY_RATE` per tick. The player has a grace window to harvest at reduced yield. Crops that decay to 0 maturity are destroyed (tile's `planted_tick` set to nil).
+**Frost arrival:** When the calendar reaches autumn day `frost_day`, `is_frost` is set to true. Notification: "Frost has arrived." Crops stop growing (maturity no longer advances). Unharvested crops begin decaying — maturity decreases at `FROST_DECAY_RATE` per tick. The player has a grace window to harvest at reduced yield. Crops that decay to 0 maturity are destroyed (the tile's `farming.planted_ticks` and `farming.harvest_flagged` entries are cleared).
 
 **Year start roll:** `thaw_day` and `frost_day` are rolled using the seeded RNG at the start of each year (same deterministic sequence as map generation). Exact day ranges are TBD during tuning — the ranges should create years where wheat is sometimes risky but barley and flax are almost always safe.
 
 PER-TILE CROP STATE
 
-Farm tiles track crop state with a single value: `planted_tick`. This is stored in a sparse table on the farm building, keyed by tile index.
+Farm tiles track crop state in a sparse table on the farm building: `farming.planted_ticks`, keyed by tile index. Each entry is the tick the tile was planted.
 
-- `planted_tick = nil` → tile is empty, eligible for planting (if `allow_planting` is on and `is_frost` is false)
-- `planted_tick = tick` → tile is planted, maturity derived as `clamp((current_tick - planted_tick) / CropConfig[crop].growth_ticks, 0, 1)`
+- `farming.planted_ticks[tile_idx] = nil` → tile is empty, eligible for planting (if `allow_planting` is on and `is_frost` is false)
+- `farming.planted_ticks[tile_idx] = tick` → tile is planted, maturity derived as `clamp((current_tick - farming.planted_ticks[tile_idx]) / CropConfig[crop].growth_ticks, 0, 1)`
 
 No per-tile state machine — just a timestamp and a formula.
 
@@ -248,13 +255,13 @@ FARM CONTROLS
 
 Four controls on each farm:
 
-- **Crop selector:** wheat / barley / flax / nil (fallow). Changing crop destroys any currently planted tiles. Setting to nil disables all farming work.
+- **Crop selector:** wheat / barley / flax / nil (fallow). Changing crop destroys any currently planted tiles — clears both `farming.planted_ticks` and `farming.harvest_flagged`. Setting to nil disables all farming work.
 - **`allow_planting` toggle:** When on and `is_frost` is false, empty tiles are eligible for planting work. When off, no planting activities post regardless of season.
 - **`auto_harvest`:** Three states:
   - `"off"` — No auto-harvest. Player uses "Harvest Now" for all harvesting.
   - `"per_tile"` — Each tile becomes eligible for harvest work individually when it reaches 1.0 maturity.
   - `"per_farm"` — The farm waits for all planted tiles to reach 1.0 maturity, then all become eligible simultaneously. Punishes staggered planting — the earliest tiles sit at 100% waiting for the last.
-- **"Harvest Now" button:** One-shot action. Makes all planted tiles immediately eligible for harvest at their current maturity. This is the only way to harvest immature crops. Does not change the `auto_harvest` setting.
+- **"Harvest Now" button:** One-shot action. Adds every currently planted tile to `farming.harvest_flagged`. Flagged tiles are eligible for harvest at their current maturity regardless of `auto_harvest` mode. Entries are cleared as tiles are harvested or destroyed. This is the only way to harvest immature crops. Does not change the `auto_harvest` setting.
 
 FARM ACTIVITY POSTING
 
@@ -292,7 +299,7 @@ The drop function prefers to keep ground piles below `GROUND_PILE_PREFERRED_CAPA
 
 ## Storage Filter System
 
-Storage buildings (stockpiles, warehouses, barns) use a per-type filter system that controls both what the building accepts and whether it actively pulls resources from other storage.
+Storage buildings (stockpiles, warehouses, barns) use a per-type filter system that controls both what the building accepts and whether it actively pulls resources from other storage. Default routing — offloading, deposit steps of work cycles, and ground pile cleanup conversion — delivers to the nearest storage building that accepts the type and has capacity. Pull filter entries layer on top of that default to actively move specific resources between specific buildings.
 
 FILTER TABLE
 
@@ -326,14 +333,7 @@ Where `current_stock` is the building's stock of the type and `reserved_in` is i
 
 If `needed > 0` and no request exists for this filter entry, post one to `world.requests` with `requested_amount = needed`, `destination_id = this building`, `source_id = filter.source_id` (or nil for "from anywhere"). Append the new request's id to the puller's `posted_request_ids`. If a request already exists, update its `requested_amount` to match the current `needed` (the deficit may have shrunk via deliveries or grown if other sources of stock changed). If `needed <= 0`, remove the request from `world.requests`, registry, and the puller's `posted_request_ids` (swap-and-pop).
 
-Haulers pick up requests from `world.requests` and convert them into trip-sized activities at claim time:
-
-```lua
-units_per_trip = floor(CARRY_WEIGHT_MAX / ResourceConfig[resource].weight)
-trip_amount = min(request.requested_amount, units_per_trip, source_available_stock)
-```
-
-The conversion places source-side and destination-side reservations atomically and decrements the request's `requested_amount`. If `requested_amount` hits zero during conversion, the request is also removed from the puller's `posted_request_ids`. See HAULING.md Request → Activity Conversion for the full atomic operation.
+Workers convert requests into concrete trip-sized activities at claim time. See HAULING.md § Request → Activity Conversion for the conversion mechanics, including reservation placement and `requested_amount` decrement.
 
 The `reserved_in` term in `needed` accounts for already-claimed trips (each conversion places `reserved_in`, which the next filter scan reads). The remaining `requested_amount` on the request itself accounts for trips not yet claimed. Together they describe the full in-flight commitment to filling this filter entry.
 
@@ -355,14 +355,6 @@ EDGE CASES
 - Resource with no valid destination at delivery: `dropToGround` at the unit's current position.
 - Source building deleted: any filter entry on other buildings with `source_id` pointing to the deleted building reverts to `{ mode = "accept", limit = <preserved> }`. Keeps the limit, drops the directive. Active requests with that source_id are removed by Building Deletion (BEHAVIOR.md).
 - Destination building deleted: the puller's filter pull request is removed by Building Deletion. In-flight haul activities are handled by the deletion matrix.
-
-RESOURCE MOVEMENT OVERVIEW
-
-Three public haul variants — ground pile cleanup, construction delivery, and filter pull — are posted as **requests** in `world.requests` (aggregate haul needs) and converted into concrete trip-sized activities by haulers at claim time. Private hauls (processing source-fetch, self-deposit, merchant delivery, home food self-fetch as an eat path, equipment fetch, eating trip, offloading) are posted directly as activities in `world.activities`. See HAULING.md for the full request/activity model and variant catalog.
-
-**Storage filters** control inter-storage resource flow. Default routing (offloading, ground pile cleanup conversion) delivers to the nearest storage building that accepts the type and has capacity. "Pull" filter entries post requests to actively move resources between specific buildings. The filter table on each storage building is the complete logistics configuration.
-
-**Activity and request scoring** uses the same formula — see BEHAVIOR.md Activity Scoring (and HAULING.md Worker Polling for the request-side specifics).
 
 ## Merchant Delivery System
 
