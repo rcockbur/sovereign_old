@@ -1,5 +1,5 @@
 # Sovereign — HAULING.md
-*v10 · Resource movement: requests, activities, reservations, variant catalog.*
+*v11 · Resource movement: requests, activities, reservations, variant catalog.*
 
 ## Overview
 
@@ -103,6 +103,7 @@ Full catalog:
 | Build | `to_site`, `waiting`, `working` |
 | Sleep | `to_sleep_site`, `sleeping` |
 | Wander | `wandering` |
+| Daydream | `daydreaming` |
 | Tavern | `to_tavern`, `at_tavern` |
 | Eat | `to_consumption_site`, `fetching_food_to_source`, `fetching_food_returning`, `consuming` |
 
@@ -155,7 +156,7 @@ Posted and claimed atomically by the unit. Both endpoints are concrete at post t
 
 **Processing source-fetch.** A processing activity is a single activity with an optional source-fetch step preceding the workplace step. When a worker claims a processing activity and the building's input bins are insufficient for the next recipe, the claim is atomic with: resolving the nearest storage with available stock for the needed input, reserving the source-side stock, and configuring the activity to start in `to_input_source`. The worker travels to source → pickup full carry load → travels to workplace (`to_workplace`) → executes the work loop (`working`) → produces output → executes the deposit step (`to_storage`). If bins are sufficient at claim time, the source-fetch is skipped; the activity starts directly in `to_workplace`. Excess input beyond the recipe's needs stays in the bin for future crafts. Applies to any worker at a processing building regardless of class. Source resolution includes stockpiles, warehouses (for stackable inputs), barns (for items), and ground piles.
 
-Mid-craft input depletion (the worker has finished one craft, has carry room for more output, but bins are empty for the next recipe): the worker completes the current activity normally (executing the deposit step for output already in carry), returns to idle, polls. If the workplace re-posts (still has eligible work after re-validation), the worker re-claims with a fresh source-fetch. The HASH_INTERVAL gap that would have applied is short-circuited by `onActionComplete`'s on-completion poll (see Worker Polling below).
+Mid-craft input depletion (the worker has finished one craft, has carry room for more output, but bins are empty for the next recipe): the worker completes the current activity normally (executing the deposit step for output already in carry), returns to idle, polls. If the workplace re-posts (still has eligible work after re-validation), the worker re-claims with a fresh source-fetch. The HASH_INTERVAL gap that would have applied is short-circuited by the poll inside `onActivityComplete` (see Worker Polling below).
 
 **Self-deposit.** The deposit step of a work activity that ended with output in carry — processing crafting outputs, gathering returning with resources, farming completing a harvest with crop in carry. Destination = nearest storage with available capacity for the carried type (stockpiles and warehouses for stackable resources, stockpiles and barns for items). The worker resolves destination at the moment the deposit step begins, reserves destination-side capacity, travels, deposits. If the destination's available capacity is less than the carry, the partial-fill chain handles the remainder — see below.
 
@@ -246,9 +247,9 @@ Distance for requests uses `distance(hauler, source) + cached_source_to_dest`, w
 
 ON-COMPLETION POLL
 
-`onActionComplete` polls for new work when a unit just finished an activity and is idle + not carrying. This sits between the "idle + carrying → offload" branch and the "no activity → idle" branch. If the poll finds eligible work, the unit claims and dispatches immediately. If not, falls through to idle and waits for the next per-hash tick, same as any other idle unit.
+`onActivityComplete` polls for new work when a unit just finished an activity naturally. The poll uses the same filter and scoring rules described above. If it finds eligible work, the unit claims and dispatches immediately. If not, it falls through to the recreation-selection branch (see BEHAVIOR.md Work Day and Recreation), or to idle as the last resort.
 
-This eliminates the HASH_INTERVAL gap that would otherwise occur between completing one activity and starting the next. Per-hash polling (BEHAVIOR.md per-hash loop) remains the only polling mechanism for units who became idle without finishing an activity (e.g., after a hard interrupt completed and they're awake again).
+This eliminates the HASH_INTERVAL gap that would otherwise occur between completing one activity and starting the next. Per-hash polling (BEHAVIOR.md per-hash loop step 6) shares the same logic and serves as the periodic retry — both for units who failed `onActivityComplete`'s poll and for units who became idle through other paths (post-hard-interrupt cleanup, post-draft, post-building-deletion).
 
 ELIGIBILITY VALIDATION
 
@@ -288,6 +289,6 @@ When a worker becomes idle while carrying resources wrong for any of their next 
 - **Merchant delivery loop** — ECONOMY.md Merchant Delivery System.
 - **Ground pile creation and drop search** — ECONOMY.md Ground Piles.
 - **Carrying mechanics and weight cap** — BEHAVIOR.md Carrying.
-- **`onActionComplete` priority chain** — BEHAVIOR.md Action System.
+- **`onActionComplete` priority chain and `onActivityComplete`** — BEHAVIOR.md Action System.
 - **Activity scoring formula** — BEHAVIOR.md Activity Scoring.
 - **Eating consumption loop, food variety, homeless source priority** — BEHAVIOR.md Eating Behavior, Homeless Eating.

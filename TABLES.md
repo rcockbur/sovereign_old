@@ -1,5 +1,5 @@
 # Sovereign — TABLES.md
-*v30 · Reference data: game entity data structures, config tables, and production chains.*
+*v33 · Reference data: game entity data structures, config tables, and production chains.*
 
 ## Data Structures
 
@@ -73,15 +73,17 @@ unit = {
     claimed_tile = nil,     -- tileIndex of claimed resource tile, or nil
 
     activity_id = nil,                   -- the unit's current activity (work, haul, need, recreation). One slot, one activity at a time.
-    current_action = nil,          -- { type = "travel"|"work"|"sleep"|"idle", ... }
+    current_action = nil,          -- { type = "travel"|"work"|"eat"|"sleep"|"idle", ... }
+                                    -- idle takes optional target_ticks for daydreaming and other timed waits;
+                                    -- without target_ticks, idle never completes. See BEHAVIOR.md Action System.
     soft_interrupt_pending = false, -- set by per-hash soft interrupt check, consumed by onActionComplete
     home_id = nil,                  -- building id of housing building
     bed_index = nil,                -- index into home building's housing.beds array, or nil
 
     -- Work day (see BEHAVIOR.md Work Day and Recreation)
-    work_hours = 11,                    -- configurable 10/11/12 by player
-    work_ticks_remaining = 0,           -- decrements during work-related states; reset at WORK_DAY_RESET_HOUR
-    is_done_working = false,            -- true when work_ticks_remaining hits 0; reset at WORK_DAY_RESET_HOUR
+    daily_patience = 11 * TICKS_PER_HOUR,   -- configurable per-unit; player UI selects in hours, stored as ticks
+    patience = 0,                       -- decrements every tick except during interrupt activities; refilled at WORK_DAY_RESET_HOUR
+    is_done_working = false,            -- true when patience hits 0; cleared at WORK_DAY_RESET_HOUR
     x = 0, y = 0,
     target_tile = nil,      -- tileIndex of destination (moving) or standing position (stationary)
 
@@ -329,6 +331,11 @@ building = {
         allow_planting = false, -- toggle. When on, empty tiles are eligible for planting work.
         auto_harvest = "off",   -- "off" | "per_tile" | "per_farm" — see ECONOMY.md Farm Controls
         planted_ticks = {},     -- sparse: planted_ticks[tileIndex] = tick when planted, nil = empty
+        decay_tiles = {},       -- sparse: decay_tiles[tileIndex] = accumulated frost decay in [0, 1],
+                                -- nil = no decay yet. Used as a yield multiplier (final yield scales
+                                -- by 1 - decay). Incremented during frost by CropConfig[crop].decay
+                                -- per tick. Reset on thaw and on crop change. Tile auto-cleared when
+                                -- decay reaches 1.0. See ECONOMY.md Frost and Farming.
         harvest_flagged = {},   -- sparse: harvest_flagged[tileIndex] = true for tiles flagged by
                                 -- "Harvest Now". Eligible for harvest regardless of auto_harvest mode
                                 -- or maturity. Entries removed as tiles are harvested or destroyed.
@@ -473,11 +480,11 @@ A season is 7 days. `game_day` (1–7) is both the day-of-season and the weekday
 -- Satiation soft_threshold is flat at 75 (not time-varying). Energy soft threshold is
 -- time-of-day rather than a flat field — see SleepConfig and BEHAVIOR.md Sleep.
 -- Recreation is a mood meter, not a behavioral interrupt (see BEHAVIOR.md Work Day and
--- Recreation); only mood_threshold and mood_penalty live here.
+-- Recreation). Per-recreation-activity recovery rates live in RecreationConfig.
 NeedsConfig = {
-    satiation  = { drain = 2 * PER_HOUR, soft_threshold = 75, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
-    energy     = { drain = 4 * PER_HOUR,                      hard_threshold = 10, mood_threshold = 30, mood_penalty = -10 },
-    recreation = { mood_threshold = 30, mood_penalty = -10 },
+    satiation  = { drain = 2 * PER_HOUR,    soft_threshold = 75, hard_threshold = 15, mood_threshold = 30, mood_penalty = -10 },
+    energy     = { drain = 4 * PER_HOUR,                         hard_threshold = 10, mood_threshold = 30, mood_penalty = -10 },
+    recreation = { drain = 4.55 * PER_HOUR,                                           mood_threshold = 30, mood_penalty = -10 },
 }
 
 -- Sleep mechanics. Recovery is the per-tick energy gain while in the sleep action.
@@ -495,13 +502,12 @@ SleepConfig = {
     day   = { soft = 20, wake = 85  },
 }
 
--- Recreation: mood meter, not a behavioral interrupt. See BEHAVIOR.md Work Day and Recreation.
--- Mood thresholds live in NeedsConfig.recreation.
+-- Per-recreation-activity tuning. Drain and mood thresholds live in NeedsConfig.recreation.
+-- See BEHAVIOR.md Work Day and Recreation.
 RecreationConfig = {
-    work_drain      = 4.55 * PER_HOUR,    -- drains while awake and not recreating
-    recovery_rate   = 10 * PER_HOUR,       -- base rate; subject to diminishing returns
-    -- Diminishing returns formula TBD during tuning. Effective recovery =
-    -- recovery_rate * diminishing_factor(current_recreation).
+    wander    = { recovery_rate = 10 * PER_HOUR },
+    daydream  = { min_ticks = 4 * TICK_RATE, max_ticks = 12 * TICK_RATE, recovery_rate = 10 * PER_HOUR },
+    -- tavern entry added in Phase 4. Per-activity diminishing returns formula TBD during tuning.
 }
 
 MerchantConfig = {
@@ -719,14 +725,29 @@ PlantConfig = {
 }
 
 CropConfig = {
+    -- Per-crop values that are still TBD during design are set to nil — Lua hard-fails on any
+    -- arithmetic use, and config validation catches them at startup (see DEV.md Config Validation).
+    --
     -- growth_ticks: time from planted_tick to 1.0 maturity. Crops differ — wheat is slowest/riskiest,
-    -- flax is fastest/safest. Maturity per tile = clamp((current_tick - planted_tick) / growth_ticks, 0, 1).
-    -- yield_per_tile: output at 1.0 maturity. Partial harvest = floor(yield_per_tile * maturity).
+    -- flax is fastest/safest.
+    --
+    -- decay: per-tick rate added to farming.decay_tiles[tile] during frost. Stored per-tile as a
+    -- 0-to-1 accumulator representing yield loss (0 = full yield, 1 = zero yield). Tile is
+    -- auto-cleared when its accumulator reaches 1.0. Authored in readable units via the PER_DAY
+    -- helper (e.g. `decay = 0.5 * PER_DAY` = half-maturity-worth of yield loss per game-day of
+    -- frost exposure). Per-crop rate lets wheat be punished harder than flax.
+    --
+    -- Yield formula (per tile, at harvest):
+    --   maturity        = clamp((current_tick - planted_tick) / growth_ticks, 0, 1)
+    --   maturity_factor = max(0, (maturity - 0.5) / 0.5)              -- 0 below 50%, linear 0→1 from 50%→100%
+    --   decay           = decay_tiles[tile] or 0
+    --   yield           = floor(yield_per_tile * maturity_factor * (1 - decay))
+    --
     -- 1:1:1 conversion through the bread chain: 1 wheat → 1 flour → 1 bread. Each unit of wheat
     -- represents one potential unit of bread, making food assessment intuitive.
-    wheat  = { plant_ticks = 15 * TICKS_PER_MINUTE, harvest_ticks = 30 * TICKS_PER_MINUTE, growth_ticks = 0, yield_per_tile = 8 },   -- growth_ticks TBD (longest)
-    barley = { plant_ticks = 15 * TICKS_PER_MINUTE, harvest_ticks = 30 * TICKS_PER_MINUTE, growth_ticks = 0, yield_per_tile = 6 },   -- growth_ticks TBD (medium)
-    flax   = { plant_ticks = 15 * TICKS_PER_MINUTE, harvest_ticks = 30 * TICKS_PER_MINUTE, growth_ticks = 0, yield_per_tile = 10 },  -- growth_ticks TBD (shortest)
+    wheat  = { plant_ticks = 15 * TICKS_PER_MINUTE, harvest_ticks = 30 * TICKS_PER_MINUTE, growth_ticks = nil, yield_per_tile = 8,  decay = nil },   -- TBD: longest growth, highest decay rate
+    barley = { plant_ticks = 15 * TICKS_PER_MINUTE, harvest_ticks = 30 * TICKS_PER_MINUTE, growth_ticks = nil, yield_per_tile = 6,  decay = nil },   -- TBD: medium
+    flax   = { plant_ticks = 15 * TICKS_PER_MINUTE, harvest_ticks = 30 * TICKS_PER_MINUTE, growth_ticks = nil, yield_per_tile = 10, decay = nil },   -- TBD: shortest growth, lowest decay rate
 }
 ```
 

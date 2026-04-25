@@ -1,5 +1,5 @@
 # Sovereign — ECONOMY.md
-*v25 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
+*v26 · Resource infrastructure: entities, containers, reservations, storage filters, merchant delivery, firewood.*
 
 ## Resource System
 
@@ -238,24 +238,26 @@ At the start of each year, the game rolls two values: `thaw_day` (a spring day n
 
 **Frost warning:** 1–2 days before `frost_day` (configurable via `FROST_WARNING_DAYS`), notification: "Frost is approaching." This is the player's signal to trigger "Harvest Now" on any farms with immature crops.
 
-**Frost arrival:** When the calendar reaches autumn day `frost_day`, `is_frost` is set to true. Notification: "Frost has arrived." Crops stop growing (maturity no longer advances). Unharvested crops begin decaying — maturity decreases at `FROST_DECAY_RATE` per tick. The player has a grace window to harvest at reduced yield. Crops that decay to 0 maturity are destroyed (the tile's `farming.planted_ticks` and `farming.harvest_flagged` entries are cleared).
+**Frost arrival:** When the calendar reaches autumn day `frost_day`, `is_frost` is set to true. Notification: "Frost has arrived." Crops stop growing (maturity no longer advances). Unharvested crops begin decaying — each planted tile's `farming.decay_tiles[tile_idx]` accumulator (initialized to nil, treated as 0) is incremented by `CropConfig[crop].decay` per tick. Decay acts as a yield multiplier at harvest: `(1 - decay)`. When a tile's accumulator reaches 1.0, it is destroyed — the tile's `farming.planted_ticks`, `farming.decay_tiles`, and `farming.harvest_flagged` entries are all cleared.
 
 **Year start roll:** `thaw_day` and `frost_day` are rolled using the seeded RNG at the start of each year (same deterministic sequence as map generation). Exact day ranges are TBD during tuning — the ranges should create years where wheat is sometimes risky but barley and flax are almost always safe.
 
 PER-TILE CROP STATE
 
-Farm tiles track crop state in a sparse table on the farm building: `farming.planted_ticks`, keyed by tile index. Each entry is the tick the tile was planted.
+Farm tiles track crop state in two sparse tables on the farm building, both keyed by tile index: `farming.planted_ticks` (when the tile was planted) and `farming.decay_tiles` (accumulated frost decay, 0 to 1).
 
 - `farming.planted_ticks[tile_idx] = nil` → tile is empty, eligible for planting (if `allow_planting` is on and `is_frost` is false)
 - `farming.planted_ticks[tile_idx] = tick` → tile is planted, maturity derived as `clamp((current_tick - farming.planted_ticks[tile_idx]) / CropConfig[crop].growth_ticks, 0, 1)`
+- `farming.decay_tiles[tile_idx] = nil` → no decay accumulated (treated as 0 at harvest)
+- `farming.decay_tiles[tile_idx] = d` → accumulated frost decay. Factored into yield at harvest as `(1 - d)`. Reaches 1.0 → tile auto-cleared.
 
-No per-tile state machine — just a timestamp and a formula.
+Maturity is derived from a timestamp; decay is a stored accumulator. Decay is written by the frost tick (see Frost Arrival) and read by the harvest yield formula (see Harvest Yield).
 
 FARM CONTROLS
 
 Four controls on each farm:
 
-- **Crop selector:** wheat / barley / flax / nil (fallow). Changing crop destroys any currently planted tiles — clears both `farming.planted_ticks` and `farming.harvest_flagged`. Setting to nil disables all farming work.
+- **Crop selector:** wheat / barley / flax / nil (fallow). Changing crop destroys any currently planted tiles — clears `farming.planted_ticks`, `farming.decay_tiles`, and `farming.harvest_flagged`. Setting to nil disables all farming work.
 - **`allow_planting` toggle:** When on and `is_frost` is false, empty tiles are eligible for planting work. When off, no planting activities post regardless of season.
 - **`auto_harvest`:** Three states:
   - `"off"` — No auto-harvest. Player uses "Harvest Now" for all harvesting.
@@ -273,7 +275,16 @@ During the growing season when no tiles are eligible for planting or harvesting,
 
 HARVEST YIELD
 
-`floor(CropConfig[crop].yield_per_tile * maturity)` per tile. At 1.0 maturity, full yield. At 0.8, 80% yield.
+Per tile, at harvest:
+
+```
+maturity        = clamp((current_tick - planted_tick) / CropConfig[crop].growth_ticks, 0, 1)
+maturity_factor = max(0, (maturity - 0.5) / 0.5)                      -- 0 below 50% maturity, linear 0→1 from 50%→100%
+decay           = farming.decay_tiles[tile_idx] or 0
+yield           = floor(CropConfig[crop].yield_per_tile * maturity_factor * (1 - decay))
+```
+
+No yield below 50% maturity — panic harvests of young crops return nothing. Above 50%, yield ramps linearly and is scaled down by any accumulated frost decay.
 
 ## Ground Piles
 

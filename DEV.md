@@ -1,5 +1,5 @@
 # Sovereign — DEV.md
-*v3 · Dev tools, testing infrastructure, and startup validation.*
+*v4 · Dev tools, testing infrastructure, and startup validation.*
 
 ## Logging
 
@@ -43,8 +43,13 @@ Runs during the `loading` game state — the game never reaches `playing` with b
 - Every ResourceConfig entry with `tool_bonus` has `is_stackable == false`
 - Every BuildingConfig processing `input_bins` type matches a key in the building's recipe inputs
 - Every HousingBinConfig type matches a valid ResourceConfig key
+- Every CropConfig entry has non-nil positive `plant_ticks`, `harvest_ticks`, `growth_ticks`, `yield_per_tile`, and `decay`
 
 Errors use `error()` or `assert` with descriptive messages. No graceful fallback — broken config is a programming error.
+
+UNSET PLACEHOLDER CONVENTION
+
+Config values that are still TBD during design are set to `nil`, not `0`. A `0` placeholder is dishonest (can't be distinguished from "intentionally zero") and typically causes divide-by-zero or silent 1.0-clamp bugs at first use. `nil` is honest: Lua hard-fails on any arithmetic use, and the validation rules above catch missing fields at startup rather than at first use. When a tunable is finalized, replace `nil` with the chosen value.
 
 ## Tests
 

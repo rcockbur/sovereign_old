@@ -1,5 +1,5 @@
 # Sovereign — CLAUDE.md
-*v37 · Technical reference for Claude Code and Claude.ai design sessions.*
+*v40 · Technical reference for Claude Code and Claude.ai design sessions.*
 
 > **Temporary content:** Config table values and data structure field listings are included in the technical reference files until the corresponding Lua files exist in the repo. Once implemented, trim those sections to shape/intent only — the code becomes the source of truth for specific values and fields.
 
@@ -9,7 +9,7 @@ Detailed specs live in separate files. Read the relevant file before implementin
 
 | File | Contents |
 |---|---|
-| **BEHAVIOR.md** | Tick order, hash offset, per-unit update loops (per-tick and per-hash), action types and handlers, `onActionComplete` priority chain (soft interrupt consumption, offloading dispatch, on-completion poll, activity handler dispatch), need interrupts (soft/hard, availability gating, priority ordering), sleep (time-of-day thresholds, wake check, sleep destination, collapse), home assignment, eating behavior, homeless eating, work day and recreation (work_ticks_remaining, is_done_working, daily reset, tavern visits, wandering), carrying (rules, single-type invariant, weight cap), work cycles (designation, gathering, extraction, processing, farming, construction — site clearing, unit displacement, blueprint transition, builder cycle), production order evaluation, work in progress, equipment want detection (fetch mechanics live in HAULING.md), drafting, unit death cleanup, building deletion cleanup, classes and specialties (promotion, children, activity filtering, skill growth). |
+| **BEHAVIOR.md** | Tick order, hash offset, per-unit update loops (per-tick and per-hash), action types and handlers, `onActionComplete` priority chain (soft interrupt consumption, offloading dispatch, activity handler dispatch), `onActivityComplete` (post-activity poll: work then recreation fallback), need interrupts (soft/hard, availability gating, priority ordering), sleep (time-of-day thresholds, wake check, sleep destination, collapse), home assignment, eating behavior, homeless eating, work day and recreation (patience, is_done_working, daily reset, fallback recreation, tavern visits, wandering, daydreaming), carrying (rules, single-type invariant, weight cap), work cycles (designation, gathering, extraction, processing, farming, construction — site clearing, unit displacement, blueprint transition, builder cycle), production order evaluation, work in progress, equipment want detection (fetch mechanics live in HAULING.md), drafting, unit death cleanup, building deletion cleanup, classes and specialties (promotion, children, activity filtering, skill growth). |
 | **HAULING.md** | Request and activity model, generic haul cycle, reservation placement and release timing, activity slot, cleanup, variant catalog (request-based public: filter pull, construction delivery, ground pile cleanup; private transport: self-fetch as head phase, self-deposit as tail phase, merchant delivery; private pickup/use: equipment fetch, eating trip; offloading as recovery path), request → activity conversion, partial-fill chain, worker polling (queue scan + on-completion poll), eligibility validation, carrying interaction. |
 | **ECONOMY.md** | Resource entities (stacks, items), containers (bin, tile inventory, stack inventory, item inventory, ground pile), reservation system (mechanism and lifecycle, inviolate-except-player-intervention rule), resources module API, resource counts system, frost and farming (thaw/frost system, per-tile crop state, farm controls, farm activity posting, harvest yield), ground piles (creation, request self-posting, ground drop search algorithm), storage filter system (filter modes, pull mechanics via requests, source resolution, cycle detection), merchant delivery system, firewood production and home heating. |
 | **WORLD.md** | Map (dimensions, terrain, forest coverage, forest depth), map generation (noise setup, full pipeline, tuning), pathfinding (A*, tile costs, A* building exemption, movement model, movement speed, collision, failure), building layout (tile types, tile maps, clearing, orientation, placement validation, construction states, buildings without tile maps, pathfinding integration), plant system (growth stages, spread, cursor scan), visibility (deferred). |
@@ -18,7 +18,7 @@ Detailed specs live in separate files. Read the relevant file before implementin
 | **DEV.md** | Logging system, developer overlay (F3 hotkey, stats bar, tile inspector), TPS tracking, debug spawn (F1), config validation rules, logic tests. Loaded only when work touches dev tooling, the log system, validation, or tests. |
 | **CODE_AUDIT.md** | Code audit process: 7 calibrations, 6 silent per-finding sanity checks, finding format, recurring failure modes. Loaded only when an audit prompt directs. |
 
-**BEHAVIOR.md vs HAULING.md vs ECONOMY.md boundary:** BEHAVIOR.md owns what units do — work cycles, action types, need interrupts, sleep, drafting, classes, the `onActionComplete` priority chain. HAULING.md owns the resource-movement system as its own mechanism — request/activity model, generic haul cycle, reservation lifecycle, variant catalog, partial-fill chain, offloading. ECONOMY.md owns what the resource system provides — entities, containers, the resources module API, reservations as a low-level mechanism, the storage filter table, merchant delivery loop, ground pile drop algorithm. When a unit's behavior triggers a haul (need interrupt fires, equipment want fires, work cycle reaches a deposit phase), the trigger lives in BEHAVIOR.md and cross-references HAULING.md for the haul mechanics. When HAULING.md needs reservation primitives or container APIs, it cross-references ECONOMY.md. A task involving unit behavior typically needs BEHAVIOR.md plus TABLES.md, with HAULING.md added when the task involves resource movement. ECONOMY.md is loaded when working on resource infrastructure itself.
+**BEHAVIOR.md vs HAULING.md vs ECONOMY.md boundary:** BEHAVIOR.md owns what units do — work cycles, action types, need interrupts, sleep, drafting, classes, the `onActionComplete` and `onActivityComplete` decision chains. HAULING.md owns the resource-movement system as its own mechanism — request/activity model, generic haul cycle, reservation lifecycle, variant catalog, partial-fill chain, offloading. ECONOMY.md owns what the resource system provides — entities, containers, the resources module API, reservations as a low-level mechanism, the storage filter table, merchant delivery loop, ground pile drop algorithm. When a unit's behavior triggers a haul (need interrupt fires, equipment want fires, work cycle reaches a deposit phase), the trigger lives in BEHAVIOR.md and cross-references HAULING.md for the haul mechanics. When HAULING.md needs reservation primitives or container APIs, it cross-references ECONOMY.md. A task involving unit behavior typically needs BEHAVIOR.md plus TABLES.md, with HAULING.md added when the task involves resource movement. ECONOMY.md is loaded when working on resource infrastructure itself.
 
 **Simulation vs UI split:** BEHAVIOR.md, HAULING.md, ECONOMY.md, WORLD.md, and TABLES.md own everything that would exist in a headless run — rules, state, behavior, formulas. UI.md owns how the player sees and interacts with the simulation — panels, input handling, camera, layout, interaction flows. None of it exists in a headless run.
 
@@ -329,7 +329,7 @@ AGE_OF_SCHOOLING = 6
 -- THAW_DAY_MIN / THAW_DAY_MAX: range for spring thaw day roll
 -- FROST_DAY_MIN / FROST_DAY_MAX: range for autumn frost day roll
 -- FROST_WARNING_DAYS: days before frost_day that "frost approaching" notification fires
--- FROST_DECAY_RATE: maturity loss per tick on unharvested crops after frost arrives (TBD)
+-- Per-crop decay rates live in CropConfig (see TABLES.md).
 
 -- Plants
 SPREAD_TILES_PER_TICK = 50
@@ -364,7 +364,7 @@ FOOD_VARIETY_WINDOW = 3 * TICKS_PER_DAY   -- food types eaten within this window
 EAT_TICKS           = 15 * TICKS_PER_MINUTE   -- duration of one item's eat action
 
 -- Work day and recreation
-WORK_DAY_RESET_HOUR      = 4     -- is_done_working resets, work_ticks_remaining refills
+WORK_DAY_RESET_HOUR      = 4     -- patience refills, is_done_working clears
 RECREATION_WANDER_RADIUS = 6     -- tiles from home for wandering recreation
 
 -- Rendering

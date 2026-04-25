@@ -1,5 +1,5 @@
 # Sovereign — BEHAVIOR.md
-*v30 · Unit behavior: tick order, update loops, action system, classes and specialties.*
+*v32 · Unit behavior: tick order, update loops, action system, classes and specialties.*
 
 ## Simulation
 
@@ -31,7 +31,7 @@ Calendar-driven logic uses modulo checks in `simulation.onTick`, not inside indi
 
 ```lua
 if world.time.tick % TICKS_PER_DAY == WORK_DAY_RESET_HOUR * TICKS_PER_HOUR then
-    units.resetWorkDay()    -- walk living units, reset work_ticks_remaining / is_done_working
+    units.resetWorkDay()    -- walk living units, refill patience, clear is_done_working
 end
 if world.time.tick % TICKS_PER_SEASON == 0 then
     units.processSeasonalAging()
@@ -74,8 +74,8 @@ Unit updates are split into two loops: a **per-tick** loop that runs every tick 
 **Per-tick loop (every tick, every living unit):**
 
 1. **Advance current action** — `moveStep()` for travel, `workStep()` for work (increments progress, grows skill for specialty workers), `eatStep()` for the eat action (increments progress), `sleepStep()` for the sleep action (recovers energy, checks wake threshold — see Sleep section). Idle does nothing per-tick.
-2. **Decrement work day counter** — if `activity_id` is set and `registry[activity_id].purpose == "work"`, decrement `work_ticks_remaining` by 1 (clamped at 0). Interrupt and recreation activities do not decrement it.
-3. **On action complete** → `onActionComplete()` fires inline. See the `onActionComplete` pseudocode for the full priority chain: soft interrupt consumption, offloading, idle, activity handler dispatch.
+2. **Decrement patience** — decrement `patience` by 1 (clamped at 0) unless the current activity has `purpose == "interrupt"`. Work, idle, drafted movement, and recreation activities all decrement; eat, sleep, and equipment fetch do not. The recreation case is a no-op since `patience` is already at 0 by then; including it keeps the rule expressible as a single negative check.
+3. **On action complete** → `onActionComplete()` fires inline. See the `onActionComplete` pseudocode for the full priority chain: soft interrupt consumption, offloading, activity handler dispatch. When the handler determines the activity itself is finished, it clears `activity_id` and reservations, then calls `onActivityComplete()` for the post-activity poll.
 
 ```lua
 function units.tickAll()
@@ -94,10 +94,8 @@ end
 2. **Check hard need interrupts** — skipped if `is_drafted`. Satiation (availability-gated) and energy checked against hard thresholds. Each need's check is skipped when the current activity is already addressing that need (satiation when activity is `"eat"`, energy when activity is `"sleep"`) — see Need Interrupts In-Progress Skip Rule. See Need Interrupts for threshold values, availability gating, priority ordering, and cleanup behavior. See Sleep for energy-specific destination logic.
 3. **Check soft need interrupts** — skipped if `is_drafted`. Energy (time-varying threshold) and satiation (flat threshold, availability-gated) checked. Same in-progress skip rule as step 2. If below threshold: if the unit is already at a clean break (idle and not carrying), execute the soft interrupt directly — recheck threshold, post private need activity if still below, same priority and recheck logic as the `onActionComplete` path. No flag set. Otherwise set `soft_interrupt_pending` for deferred consumption. See Need Interrupts for the full consumption flow.
 4. **Check equipment wants** — skipped if `is_drafted`. If a wanted equipment type is missing and available in storage: if the unit is already at a clean break, execute the equipment fetch directly (same logic as the `onActionComplete` path). Otherwise set `soft_interrupt_pending` for deferred consumption. See Equipment Wants for want rules, availability gating, and fetch flow.
-5. **Check work day counter** — skipped if `is_drafted`. If `work_ticks_remaining` has reached 0 and `is_done_working` is not yet true, set `is_done_working = true`. The daily reset of `work_ticks_remaining` and `is_done_working` fires from the calendar-driven block in `simulation.onTick` (see Tick Order), not from here. See Work Day and Recreation.
-6. **Poll activity queue or select recreation** — skipped if `is_drafted`. If idle:
-   - `is_done_working == false`: scan for best activity (skipped if `class == "gentry"`). This is the periodic retry for units that were idle at `onActionComplete` — new activities may have been posted since the last hash tick.
-   - `is_done_working == true`: select best available recreation activity, post and claim a private recreation activity. See Work Day and Recreation for selection logic.
+5. **Check patience** — skipped if `is_drafted`. If `patience` has reached 0 and `is_done_working` is not yet true, set `is_done_working = true`. The daily refill of `patience` and clearing of `is_done_working` fires from the calendar-driven block in `simulation.onTick` (see Tick Order), not from here. See Work Day and Recreation.
+6. **Poll activity queue or select recreation** — skipped if `is_drafted`. If idle, run the same selection logic as `onActivityComplete`: when `is_done_working == false`, scan for best work activity (skipped if `class == "gentry"`); if no work found, fall through to recreation selection. When `is_done_working == true`, recreation selection only. Recreation selection picks tavern when applicable, else 50/50 between wander and daydream. Idle remains only if both branches fail. This is the periodic retry for units that became idle at `onActivityComplete` — new activities may have been posted since, and recreation rolls re-evaluate. See Work Day and Recreation for selection details.
 7. **Recalculate mood** (stateless)
 8. **Recalculate health** (stateless; death check at health <= 0)
 
@@ -105,7 +103,7 @@ Work action accumulates `skill_progress` per tick for specialty freemen/clergy (
 
 Drafted units: per-tick loop runs normally. Per-hash: steps 2–6 skipped (see Drafting).
 
-**Activity queue filtering:** Serfs scan for activities where `ActivityTypeConfig[type].is_specialty == false`, weighted by the serf's per-activity-type priority settings. Serf children (age 6+) use step 6 filtered to `SerfChildActivities` instead of the full non-specialty activity list. Freemen scan for activities where `type == unit.specialty`. Clergy scan the same way (matching their specialty). Gentry skip the work-polling branch of step 6 — they do not work — but still receive recreation activities when `is_done_working` is true. Freeman and gentry children under adulthood skip work polling (school attendance mechanics pending design).
+**Activity queue filtering:** Serfs scan for activities where `ActivityTypeConfig[type].is_specialty == false`, weighted by the serf's per-activity-type priority settings. Serf children (age 6+) use step 6 filtered to `SerfChildActivities` instead of the full non-specialty activity list. Freemen scan for activities where `type == unit.specialty`. Clergy scan the same way (matching their specialty). Gentry skip the work-poll branch of step 6 entirely — they do not work — falling through to recreation selection regardless of `is_done_working`. Freeman and gentry children under adulthood skip work polling (school attendance mechanics pending design).
 
 UNIT DEATH CLEANUP (sweepDead)
 
@@ -168,15 +166,17 @@ ACTION TYPES
 | work | increment progress, grow skill (specialty workers only) | progress reaches work_ticks |
 | eat | increment progress | progress reaches EAT_TICKS |
 | sleep | recover energy per tick (see Sleep section) | energy ≥ current wake threshold |
-| idle | do nothing | never (cleared by activity poll or interrupt) |
+| idle | if `target_ticks` is set, increment `progress` | `progress` reaches `target_ticks` (only if set) — otherwise never (cleared by activity poll or interrupt) |
 
 Resource transfers (picking up from buildings, depositing to buildings) are instant inline operations performed by the handler between actions — not actions themselves. Work completion auto-grants resources to `unit.carrying` for gathering activities (via `resources.produceIntoCarrying`). Eat completion destroys one item from `unit.carrying` and applies nutrition — see Eating Work Cycle.
 
-Recreation activities (tavern visit, wandering) are private activities with handlers, following the same pattern as eat and sleep activities. They use travel and idle actions — no distinct recreation action type. See Work Day and Recreation for the behavioral flow.
+Idle has two modes. Without `target_ticks`, idle is the default "doing nothing" state between dispatches and never completes — only an activity poll, interrupt, or external clearing moves the unit out. With `target_ticks` set, idle becomes a finite wait: per-tick increments `progress`, and the action completes when `progress` reaches `target_ticks`, firing `onActionComplete` like any other action. Daydreaming uses idle-with-target; see Work Day and Recreation.
+
+Recreation activities (tavern visit, wandering, daydreaming) are private activities with handlers, following the same pattern as eat and sleep activities. They use travel and idle actions — no distinct recreation action type.
 
 ACTIVITY HANDLERS
 
-Each activity type has a handler function that inspects the unit's state and sets the next action. `onActionComplete` is the single decision point that fires inline whenever an action finishes. It handles soft interrupt consumption, offloading, the on-completion poll, and activity handler dispatch in one priority chain:
+Each activity type has a handler function that inspects the unit's state and sets the next action. `onActionComplete` fires inline whenever an action finishes. It handles soft interrupt consumption, offloading dispatch, and activity handler dispatch. When the handler determines the activity itself is finished, it clears `activity_id` and any outstanding reservations, then calls `onActivityComplete()` — the separate decision point that polls for the next activity (work or recreation).
 
 ```lua
 function unit:onActionComplete()
@@ -206,26 +206,62 @@ function unit:onActionComplete()
         return
     end
 
-    -- 3. Activity handler decides next action (if activity in progress)
+    -- 3. Activity handler decides next action.
+    -- The handler may either set the next action and return, or — if this action
+    -- completion finishes the activity itself — clear activity_id and reservations
+    -- and call self:onActivityComplete().
     if self.activity_id ~= nil then
         local activity = registry[self.activity_id]
         ActivityHandlers[activity.type].nextAction(self, activity)
         return
     end
 
-    -- 4. On-completion poll — unit just finished an activity, idle and not carrying.
-    --    Scan world.activities (unclaimed concrete) and world.requests (aggregate
-    --    haul needs). Same filter and scoring rules as per-hash queue polling.
-    --    See HAULING.md Worker Polling.
-    -- If poll finds eligible work → claim and dispatch (set activity_id, ActivityHandlers
-    --   nextAction); return.
+    -- 4. No activity (e.g., externally cleared mid-action) → idle.
+    self.current_action = { type = "idle" }
+end
 
-    -- 5. No activity → idle. Wait for next per-hash tick to retry.
+function unit:onActivityComplete()
+    -- Called by the activity handler when the activity has finished naturally.
+    -- Invariants at entry:
+    --   activity_id == nil          (handler cleared it)
+    --   #carrying == 0              (handler drove deposit before completing;
+    --                                eat consumed carry; sleep/wander/daydream/
+    --                                build/farm-plant don't carry; all others end
+    --                                with to_storage)
+    --   soft_interrupt_pending == false  (consumed earlier in this action's
+    --                                onActionComplete)
+
+    if self.is_done_working == false then
+        -- Try work first.
+        if self.class ~= "gentry" then
+            -- Scan world.activities (unclaimed concrete) and world.requests
+            -- (aggregate haul needs). Same filter and scoring rules as per-hash
+            -- step 6. See HAULING.md Worker Polling.
+            -- If found → claim and dispatch (set activity_id, ActivityHandlers
+            --   nextAction); return.
+        end
+        -- No work (or gentry) → fall through to recreation.
+    end
+
+    -- Recreation selection: tavern (if applicable) else 50/50 wander/daydream.
+    -- Post and claim a private recreation activity, dispatch its handler; return.
+    -- See Work Day and Recreation.
+
+    -- Both branches failed (no recreation tile reachable, no tavern). Rare.
     self.current_action = { type = "idle" }
 end
 ```
 
 Handlers check `unit.carrying` first: if carrying resources that are wrong for the current work, the handler routes to the nearest storage for offloading before starting the normal cycle. If carrying resources valid for the current work (e.g., a woodcutter returning from a need interrupt still holding wood), the handler skips directly to the `to_storage` phase.
+
+The split between `onActionComplete` and `onActivityComplete`: action completion is per-action (every tick that finishes an action), activity completion is per-activity (when the handler decides "this activity is done"). The two functions cover non-overlapping concerns. `onActionComplete` runs always; `onActivityComplete` runs only when the handler explicitly calls it.
+
+**Chaining bypass.** Some handlers post the next activity directly rather than calling `onActivityComplete`, when the next-target decision is handler-internal domain logic that the generic poll wouldn't reproduce:
+
+- **Merchant delivery.** After per-trip deposit, if still carrying and more eligible homes remain, the handler posts the next trip activity (new `activity_id`) directly. Only the final trip in the run calls `onActivityComplete`.
+- **Designation tile-chaining.** Within a designation trip, when carry has room and another designation of the same type exists nearby, the handler claims the next designation directly. Only when carry is full or no more tiles does the handler fall through to `to_storage` and then `onActivityComplete`.
+
+`onActivityComplete` and per-hash step 6 share their logic by design. `onActivityComplete` tries once at completion time; per-hash step 6 retries periodically for units who failed the poll and are still idle — or who became idle without finishing an activity (e.g., post-hard-interrupt cleanup, post-draft, post-building-deletion). Recreation rolls re-evaluate on each per-hash tick, so a unit who lost a coinflip to wander when daydream was preferable will get another chance shortly.
 
 ACTIVITY SCORING
 
@@ -265,7 +301,7 @@ Building-based (hub → resource → storage):
 **Worker cycle:**
 
 1. Path to hub building (adjacent-to-rect). Arrive.
-2. Scan for the nearest valid resource tile from the **building position** (not the unit). Valid = correct plant type, mature (stage 3), and `claimed_by == nil`. If none → release activity, go idle. Building's next hash tick will see fewer targets and adjust activity count.
+2. Scan for the nearest valid resource tile from the **building position** (not the unit). Valid = correct plant type, mature (stage 3), and `claimed_by == nil`. If none → handler clears `activity_id` and calls `onActivityComplete`. Building's next hash tick will see fewer targets and adjust activity count.
 3. Claim the tile: set `unit.claimed_tile` and `tile.claimed_by`.
 4. Path to the resource tile using adjacent-to-rect (1×1). If no valid orthogonal neighbor exists, unclaim the tile, scan for the next valid resource tile from unit position.
 5. Execute work action (duration from `PlantConfig[type].harvest_ticks`).
@@ -273,7 +309,7 @@ Building-based (hub → resource → storage):
 7. Check: `unit:carryableAmount(type) >= PlantConfig[type].harvest_yield` AND a valid tile exists (scan from **unit position**)? If yes → claim next tile, go to step 4.
 8. If carry full or no valid tiles → transition to `to_storage`: route to nearest storage with capacity, deposit (see HAULING.md Self-deposit). Activity completes.
 
-The worker visits the hub once per activity, before scanning. The first scan uses building position (keeps gatherers working near their hub). Subsequent scans within the same trip use unit position (allows efficient chaining rather than bouncing back toward the hub). After deposit, the worker repolls via `onActionComplete` on-completion poll (see HAULING.md Worker Polling) and may re-claim the same building's next activity if one is posted.
+The worker visits the hub once per activity, before scanning. The first scan uses building position (keeps gatherers working near their hub). Subsequent scans within the same trip use unit position (allows efficient chaining rather than bouncing back toward the hub). After deposit, `onActivityComplete` fires (see HAULING.md Worker Polling) and the worker may re-claim the same building's next activity if one is posted.
 
 If a worker's scan at the hub finds nothing (step 2), the worker releases the activity. The race condition (building counted a target that got claimed between the building's hash tick and the worker's arrival) resolves naturally — the building's next hash tick sees fewer targets and adjusts.
 
@@ -284,7 +320,7 @@ Extraction (stationary work → storage):
 3. Check: `unit:carryableAmount(type) >= 1`? If yes → go to step 1.
 4. If carry full → transition to `to_storage`: route to nearest storage with capacity, deposit (see HAULING.md Self-deposit). Activity completes.
 
-Extraction yield is always 1 per work cycle. The cycle duration (work_ticks) is the tuning knob for extraction rate. Extraction buildings do not deplete — the building reposts a new activity on its next hash tick and the worker typically re-claims via the on-completion poll (see HAULING.md Worker Polling).
+Extraction yield is always 1 per work cycle. The cycle duration (work_ticks) is the tuning knob for extraction rate. Extraction buildings do not deplete — the building reposts a new activity on its next hash tick and the worker typically re-claims via `onActivityComplete` (see HAULING.md Worker Polling).
 
 Unclaim fires on activity abandonment (need interrupt, draft, death). Death cleanup handles `claimed_tile` in sweepDead step 8.
 
@@ -301,7 +337,7 @@ The worker's cycle within one claim:
 1. **Source-fetch** (`to_input_source` phase, configured at claim if the building's input bins are insufficient for the next recipe). Atomic with the claim: resolve nearest source with stock, reserve, route to source, withdraw a full carry load, route to building (`to_workplace`), deposit excess into the input bin. Excess beyond the recipe's needs stays in the bin for future crafts.
 2. **Work** (`working` phase). Subtract recipe inputs from bins, begin work action. On completion, finished goods go into `unit.carrying` via `resources.produceIntoCarrying`.
 3. **Continuation check.** If `unit:carryableAmount(output_type) >= recipe output amount` AND inputs are available in the bins for another cycle, go to step 2 (no source-fetch needed mid-claim — bins already have what's needed).
-4. **Deposit** (`to_storage` phase). When carry can't hold more output, OR bins are empty for the next cycle, route to nearest storage with capacity, deposit. Activity completes. The worker's `onActionComplete` then runs the on-completion poll (HAULING.md Worker Polling) and may re-claim the same workplace immediately, with a fresh source-fetch if bins still need refilling.
+4. **Deposit** (`to_storage` phase). When carry can't hold more output, OR bins are empty for the next cycle, route to nearest storage with capacity, deposit. Activity completes. The worker's `onActivityComplete` then runs the poll (HAULING.md Worker Polling) and may re-claim the same workplace immediately, with a fresh source-fetch if bins still need refilling.
 
 Carrying stays single-type — the worker deposits finished goods before any next claim begins a new fetch cycle. No mixed-type carrying.
 
@@ -321,7 +357,7 @@ Harvest:
 2. Crop goes into `unit.carrying` (via `resources.produceIntoCarrying`).
 3. More eligible tiles AND carrying has room for next tile's expected yield → go to step 1.
 4. More eligible tiles BUT carrying would overflow → drop via ground drop search from the unit's current position (see ECONOMY.md Ground Piles), go to step 1.
-5. No more eligible tiles → transition to `to_storage`: route to nearest storage with capacity, deposit (see HAULING.md Self-deposit). Activity completes. If eligible tiles remain on the farm, the farm reposts a new harvest activity and the worker typically re-claims via the on-completion poll (see HAULING.md Worker Polling).
+5. No more eligible tiles → transition to `to_storage`: route to nearest storage with capacity, deposit (see HAULING.md Self-deposit). Activity completes. If eligible tiles remain on the farm, the farm reposts a new harvest activity and the worker typically re-claims via `onActivityComplete` (see HAULING.md Worker Polling).
 
 Ground piles dropped on farm tiles during harvest self-post cleanup requests. Haulers convert and clear them in parallel while farmers keep harvesting (see HAULING.md Ground pile cleanup). During "Harvest Now" panic, the farm fills with scattered piles and haulers scramble.
 
@@ -348,7 +384,7 @@ The sleep activity is a private activity posted and claimed atomically when an e
 
 1. At destination? No → travel. If `home_id` is set, destination is home. If homeless, destination is current tile (no travel).
 2. On arrival → set `current_action = { type = "sleep" }`. `sleepStep` handles energy recovery per tick (see Sleep).
-3. On sleep complete (energy ≥ wake threshold) → release activity. Unit goes idle.
+3. On sleep complete (energy ≥ wake threshold) → handler clears `activity_id` and calls `onActivityComplete`.
 
 **Collapse:** When energy hits 0, the hard interrupt fires with standard cleanup (drop, release). The sleep activity is posted with destination = current tile. The handler skips travel and immediately enters sleep. See Sleep for collapse rules.
 
@@ -437,7 +473,7 @@ Both thresholds are continuous everywhere — every band boundary is a flat-to-l
 
 **Sleep destination:** When a soft or hard interrupt fires for energy, the destination depends on `home_id`. If `home_id` is set, the unit travels home and enters the sleep action at the assigned bed. If `home_id` is nil, the unit enters the sleep action on the current tile. Collapse always sleeps on the current tile, regardless of `home_id`. The `no_home` mood penalty already covers the homeless case continuously — there is no separate penalty for sleeping on the current tile.
 
-**Wake check (per tick during sleep action):** `sleepStep()` adds `SleepConfig.recovery_rate` to `unit.needs.energy` (capped at 100), then checks if `energy ≥ time.getEnergyThresholds().wake`. If so, the sleep action completes and `onActionComplete` fires inline. The sleep activity handler releases the activity; the unit goes idle and picks up work on the next per-hash activity poll. The wake threshold is evaluated live each tick, so a unit sleeping through evening sees the threshold climb and sleeps longer to catch the rising bar. A unit sleeping through morning sees the threshold drop and wakes earlier than the night ceiling would have allowed.
+**Wake check (per tick during sleep action):** `sleepStep()` adds `SleepConfig.recovery_rate` to `unit.needs.energy` (capped at 100), then checks if `energy ≥ time.getEnergyThresholds().wake`. If so, the sleep action completes and `onActionComplete` fires inline. The sleep activity handler clears `activity_id` and calls `onActivityComplete`, which polls for work (or recreation if `is_done_working`). The wake threshold is evaluated live each tick, so a unit sleeping through evening sees the threshold climb and sleeps longer to catch the rising bar. A unit sleeping through morning sees the threshold drop and wakes earlier than the night ceiling would have allowed.
 
 Energy does not drain during the sleep action — drain only applies while the unit is awake (per-hash loop step 1 skips drain when current action is sleep). Hard and soft energy interrupt checks are also skipped while the current activity is `"sleep"` — see Need Interrupts In-Progress Skip Rule.
 
@@ -478,37 +514,49 @@ Homeless eating is inherently less efficient than eating at home — shared food
 
 WORK DAY AND RECREATION
 
-Units have a configurable work day length (10, 11, or 12 hours), set per-unit by the player in the work priority menu. The work day is tracked by `work_ticks_remaining`, a counter that decrements once per tick when the unit's activity has `purpose == "work"` (see per-tick loop step 2). Interrupt and recreation activities do not decrement it.
+Each unit has a configurable work day length (10, 11, or 12 hours), set per-unit by the player in the work priority menu. The work day is governed by `patience`, a per-unit resource that decrements every tick except during interrupt activities (see per-tick loop step 2). When patience runs out, the unit is done working for the day.
 
-**Daily reset:** At `WORK_DAY_RESET_HOUR` (4am), `units.resetWorkDay()` walks all living units and sets `work_ticks_remaining` to the unit's configured work hours (converted to ticks) and `is_done_working` to false. The call fires from the calendar-driven block in `simulation.onTick` — see Tick Order. Driving the reset from the orchestrator (rather than per-hash step 5) synchronizes all units to the same daily clock regardless of hash offset, sleep state, or draft state.
+Patience decrements during work, idle, drafted movement, and recreation alike. The intuition: anything that isn't tending to the unit's own basic needs draws down their willingness to keep grinding. A unit who can't find work for hours still clocks out on time — they spent the day waiting around. A unit who got sick and slept all morning didn't burn patience, so they have more of the day left in them.
 
-**Transition to recreation:** When `work_ticks_remaining` reaches 0, `is_done_working` becomes true. The unit finishes its current task cleanly (including deposit). On the next per-hash step 6 where the unit is idle, recreation selection runs instead of activity polling.
+The unit's `daily_patience` field stores the configured maximum, in ticks. Player UI exposes the choice in hours.
 
-**Recreation as private activities:** Each recreation activity is a separate private activity type with its own handler, following the same pattern as eat and sleep activities. When a recreation handler completes, it releases the activity and the unit goes idle. On the next per-hash step 6, recreation selection evaluates again and may post a different recreation activity. The HASH_INTERVAL gap between recreation activities is natural — a unit standing briefly between "done wandering" and "heading to tavern" looks like a person deciding what to do next.
+**Daily reset:** At `WORK_DAY_RESET_HOUR` (4am), `units.resetWorkDay()` walks all living units and sets `patience` to the unit's `daily_patience` and `is_done_working` to false. The call fires from the calendar-driven block in `simulation.onTick` — see Tick Order. Driving the reset from the orchestrator (rather than per-hash step 5) synchronizes all units to the same daily clock regardless of hash offset, sleep state, or draft state.
 
-**Recreation selection (per-hash step 6, `is_done_working == true`):** Evaluate which recreation activity to pursue. Currently two options: visit the tavern (if exists; open hours and per-unit visit tracking pending design alongside other tavern mechanics) or wander near home. Selection runs fresh each time, so a unit that finishes wandering might discover the tavern just opened and head there next. The selection logic lives in one place — per-hash step 6 — not inside individual handlers.
+**Transition to recreation:** When `patience` reaches 0, `is_done_working` becomes true. The unit finishes its current task cleanly (including deposit). At that activity's completion, `onActivityComplete` skips the work-poll branch and runs recreation selection directly.
+
+**Fallback recreation during the work day:** When `is_done_working == false` but the work poll finds no eligible activity, `onActivityComplete` falls through to recreation selection. A worker with nothing to do wanders or daydreams instead of sitting idle. This also applies to gentry on every `onActivityComplete` (they always skip the work poll). Patience still drains during fallback recreation, so an underemployed worker reaches `is_done_working = true` on the same schedule as a working unit, just having spent the day on recreation activities. Idle remains only when both work and recreation selection fail — a rare combination, since wander needs only any reachable tile within `RECREATION_WANDER_RADIUS`.
+
+**Recreation as private activities:** Each recreation activity is a separate private activity type with its own handler, following the same pattern as eat and sleep activities. When a recreation handler completes, it clears `activity_id` and calls `onActivityComplete`, which immediately rolls a new recreation selection (or work, if `is_done_working == false`). There is no architectural pause between recreation activities — daydreaming exists for the explicit "doing nothing" beat.
+
+**Recreation selection:** Tavern is selected when applicable (exists, evening, per-unit visit gating — full rules pending design alongside other tavern mechanics). Otherwise, a 50/50 random roll between wander and daydream. Selection runs fresh each time, so consecutive recreation activities mix freely.
 
 **Wandering work cycle:**
 
 1. Pick a random tile within `RECREATION_WANDER_RADIUS` of home (or current position if homeless). Travel there.
-2. On arrival → release activity. Unit goes idle.
-3. Next per-hash step 6 selects another recreation activity (may wander again or switch to tavern).
+2. On arrival → handler clears `activity_id` and calls `onActivityComplete`.
 
-The HASH_INTERVAL gap between arrival and the next per-hash step 6 provides a natural brief pause at each wander destination. Recreation recovers during wandering at `RecreationConfig.recovery_rate`.
+Recreation recovers during wandering at `RecreationConfig.wander.recovery_rate`.
+
+**Daydreaming work cycle:**
+
+1. Roll duration: random integer in `[RecreationConfig.daydream.min_ticks, RecreationConfig.daydream.max_ticks]`. Set `current_action = { type = "idle", progress = 0, target_ticks = duration }`. The unit stands in place; per-tick increments `progress`.
+2. On action complete (`progress` reaches `target_ticks`) → handler clears `activity_id` and calls `onActivityComplete`.
+
+Daydreaming places no claim, no reservation, no path. The unit's position is wherever they happen to be. Recreation recovers during daydreaming at `RecreationConfig.daydream.recovery_rate`.
 
 **Tavern visit work cycle:**
 
 1. Travel to tavern.
 2. On arrival → eat from tavern food bins if hungry. Tavern consumption mechanics are deferred. If beer is available, consume a beer for the `beer_consumed` mood bonus.
-3. Recover recreation at the tavern recovery rate. Release activity. Unit goes idle.
+3. Recover recreation at the tavern's recreation recovery rate. Handler clears `activity_id` and calls `onActivityComplete`.
 
 The tavern combines the evening meal and recreation into one efficient trip.
 
 **Recreation meter:** Recreation (0–100) feeds mood during recalculation — see per-hash loop step 1 for drain and recovery rates. Low recreation contributes a mood penalty. There is no bonus for high recreation.
 
-**Need interrupts still fire during recreation.** Satiation and energy interrupts work normally while `is_done_working` is true. A recreating unit who gets hungry eats (need interrupt takes priority over recreation activity via standard soft/hard interrupt paths), then the next per-hash step 6 resumes recreation selection. A recreating unit whose energy drops below the soft threshold goes to sleep.
+**Need interrupts still fire during recreation.** Satiation and energy interrupts work normally regardless of `is_done_working`. A recreating unit who gets hungry eats (need interrupt takes priority over recreation activity via standard soft/hard interrupt paths), then `onActivityComplete` after eating resumes recreation selection. A recreating unit whose energy drops below the soft threshold goes to sleep.
 
-**Work does not preempt recreation.** Once `is_done_working` is true, per-hash step 6 runs recreation selection, not activity polling. New work activities posted during the evening are not picked up until the daily reset.
+**Work does not preempt recreation.** Once a recreation activity is in progress, new work activities posted during the activity are not picked up until the next `onActivityComplete` (or per-hash step 6 for an idle unit). For `is_done_working == true` units, work is always skipped. For fallback recreation (`is_done_working == false`, no work found), work is rechecked at the next `onActivityComplete`, so the latency between work appearing and being picked up is bounded by the current recreation activity's duration — short for daydream, short for wander, longer for tavern.
 
 **Tavern — evening-only model.** The barkeep stocks the tavern with food and beer from storage during daytime work hours. In the evening, units visit to eat and recreate. The tavern is not open for morning meals — homeless units eat from the nearest stockpile in the morning. Barkeep schedule details are deferred.
 
